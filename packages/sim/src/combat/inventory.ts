@@ -1,4 +1,4 @@
-import { type GunDef, WEAPONS, type WeaponId } from '@dead-tracks/shared';
+import { type ClassId, type GunDef, PERKS, WEAPONS, type WeaponId } from '@dead-tracks/shared';
 
 export const HOTBAR = 6;
 
@@ -23,9 +23,9 @@ export interface Inventory {
   pack: string[];
 }
 
-export function starterInventory(solo: boolean): Inventory {
+export function starterInventory(solo: boolean, cls: ClassId = 'drifter'): Inventory {
   // Drifter kit (§4.11): revolver and shovel; one bandage each, a tonic when solo (§4.9).
-  return {
+  const inv: Inventory = {
     slots: ['revolver', 'shovel', 'dynamite', '', '', ''],
     mags: [6, 0, 0, 0, 0, 0],
     selected: 0,
@@ -41,6 +41,33 @@ export function starterInventory(solo: boolean): Inventory {
     cooldown: 0,
     pack: [],
   };
+  switch (cls) {
+    case 'medic':
+      inv.bandage += 2;
+      break;
+    case 'engineer':
+      inv.slots = ['coachgun', 'hatchet', 'dynamite', '', '', ''];
+      inv.mags = [2, 0, 0, 0, 0, 0];
+      inv.pistol = 0;
+      inv.shells = 12;
+      break;
+    case 'gunslinger':
+      // Two revolvers: one 12-round "gun" with a deeper pouch.
+      inv.mags[0] = PERKS.gunslingerMag;
+      inv.pistol = 36;
+      break;
+    case 'prospector':
+      inv.slots = ['shovel', 'dynamite', '', '', '', ''];
+      inv.mags = [0, 0, 0, 0, 0, 0];
+      inv.pistol = 0;
+      inv.cash += 10;
+      break;
+    case 'preacher':
+      inv.slots = ['revolver', 'shovel', 'dynamite', 'holywater', '', ''];
+      inv.holywater = 2;
+      break;
+  }
+  return inv;
 }
 
 export function heldItem(inv: Inventory): string {

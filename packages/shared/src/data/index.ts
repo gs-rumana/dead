@@ -2,6 +2,7 @@
  * Tuning tables (§12). Every balance number lives here so bots, the dev panel and
  * playtests can change it without touching logic.
  */
+export * from './classes.ts';
 export * from './enemies.ts';
 export * from './items.ts';
 export * from './player.ts';

@@ -11,6 +11,7 @@ import {
   handcarToWorld,
   ITEMS,
   type ItemKind,
+  PERKS,
   LOOT,
   type LootTable,
   PACK_SLOTS,
@@ -306,7 +307,8 @@ export class ItemSystem {
         this.burn(p);
         break;
       case 'fort':
-        if (a) this.fortify(p, Number(a));
+        if (a && p.carry) this.fortify(p, Number(a));
+        else if (a) this.repairFort(p, Number(a));
         break;
       case 'shop':
         if (a && p.carry) this.sellCarried(p, a);
@@ -334,7 +336,7 @@ export class ItemSystem {
       it.slot = -1;
       it.flying = false;
       p.carry = it.id;
-      p.motor.carry = ITEMS[it.kind].carrySpeed ?? 0.75;
+      p.motor.carry = this.carrySpeed(p, it.kind);
       return;
     }
     if (this.pickupSmall(p, it.kind, it.amount)) this.items.delete(id);
@@ -518,6 +520,25 @@ export class ItemSystem {
   }
 
   /** Bolt a plate or string wire at a fortification point (§4.3). */
+  /** Carry speed for a bulky item (Prospectors move faster with loads, §4.11). */
+  carrySpeed(p: SimPlayer, kind: ItemKind): number {
+    const base = ITEMS[kind]?.carrySpeed ?? 0.75;
+    return p.cls === 'prospector' ? Math.min(1, base * PERKS.prospectorCarry) : base;
+  }
+
+  /** Engineers patch up a damaged plate or wire with their hands (§4.11). */
+  private repairFort(p: SimPlayer, point: number): void {
+    const fp = FORT_POINTS[point];
+    const kind = this.forts[point];
+    if (p.cls !== 'engineer' || !fp || !kind) return;
+    const w = trainToWorld(this.sim.poses, fp.x, fp.y, fp.z, { x: 0, y: 0, z: 0 });
+    if (!this.near(p, w.x, w.y, w.z, 4)) return;
+    const full = (kind === 1 ? FORT.plateHp : FORT.wireHp) * PERKS.engineerFortify;
+    if ((this.fortHp[point] ?? 0) >= full) return;
+    this.fortHp[point] = full;
+    this.sim.toast(p.id, kind === 1 ? 'Plate repaired' : 'Wire restrung');
+  }
+
   private fortify(p: SimPlayer, point: number): void {
     const it = p.carry ? this.items.get(p.carry) : undefined;
     const fp = FORT_POINTS[point];
@@ -525,7 +546,9 @@ export class ItemSystem {
     const w = trainToWorld(this.sim.poses, fp.x, fp.y, fp.z, { x: 0, y: 0, z: 0 });
     if (!this.near(p, w.x, w.y, w.z, 4)) return;
     this.forts[point] = it.kind === 'plate' ? 1 : 2;
-    this.fortHp[point] = it.kind === 'plate' ? FORT.plateHp : FORT.wireHp;
+    // Engineers build them twice as tough (§4.11).
+    const k = p.cls === 'engineer' ? PERKS.engineerFortify : 1;
+    this.fortHp[point] = (it.kind === 'plate' ? FORT.plateHp : FORT.wireHp) * k;
     this.remove(it.id);
     this.sim.events.push({
       ev: { e: 'toast', to: p.id, text: it.kind === 'plate' ? 'Plate bolted on' : 'Wire strung' },
@@ -685,10 +708,13 @@ export class ItemSystem {
     const sellOne = (i: number) => {
       const kind = p.inv.pack[i] as ItemKind | undefined;
       if (!kind) return 0;
-      const price = sellPrice(shop, kind);
+      const price = Math.round(sellPrice(shop, kind) * (p.cls === 'prospector' ? PERKS.prospectorSell : 1));
       if (price <= 0) return 0;
       p.inv.pack.splice(i, 1);
-      if (kind === 'bounty') this.sim.forts.bounties++;
+      if (kind === 'bounty') {
+        this.sim.forts.bounties++;
+        p.bounties++;
+      }
       return price;
     };
     let total = 0;
@@ -710,7 +736,9 @@ export class ItemSystem {
     if (!st?.shop || !it) return;
     const value =
       it.kind === 'corpse' && it.body ? ENEMIES[it.body].bodyValue : ITEMS[it.kind].value;
-    const price = Math.round(value * SELL_RATE[st.shop.kind]);
+    const price = Math.round(
+      value * SELL_RATE[st.shop.kind] * (p.cls === 'prospector' ? PERKS.prospectorSell : 1),
+    );
     if (price <= 0) return;
     p.inv.cash += price;
     this.remove(it.id);

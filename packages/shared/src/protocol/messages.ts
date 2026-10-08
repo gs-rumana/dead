@@ -4,6 +4,12 @@ import type { InputWire } from './input.ts';
 export interface JoinOptions {
   name?: string;
   protocol: number;
+  /** Account token (§4.12): the server looks up the username and unlocked classes. */
+  token?: string;
+  /** Requested class (falls back to Drifter if it isn't unlocked). */
+  cls?: string;
+  /** Party code to show in the run (set by the lobby). */
+  party?: string;
   /** Party code when joining a specific room. */
   code?: string;
   seed?: number;
@@ -41,6 +47,8 @@ export type Command =
   | { t: 'heal' }
   /** E on a named target: 'item:<id>', 'door:<st>:<piece>', 'search:<st>:<piece>', 'cargo', 'firebox', 'fort:<i>', 'shop:<st>'. */
   | { t: 'use'; target: string; hold?: boolean }
+  /** Ping wheel (§4.14): a call-out at a world spot, optionally on an enemy. */
+  | { t: 'ping'; kind: number; x: number; y: number; z: number; target?: string }
   | { t: 'drop'; throw: boolean }
   | { t: 'buy'; shop: string; kind: string }
   | { t: 'sell'; shop: string; slot: number }
@@ -106,7 +114,8 @@ export type GameEvent =
   | { e: 'zap'; ox: number; oy: number; oz: number; tx: number; ty: number; tz: number }
   /** A landmark boss wakes (or falls). */
   | { e: 'boss'; type: number; awake: boolean }
-  | { e: 'runEnd'; won: boolean };
+  | { e: 'runEnd'; won: boolean }
+  | { e: 'ping'; by: string; kind: number; x: number; y: number; z: number; target?: string };
 
 /** Host → client messages. */
 export interface ServerMessages {

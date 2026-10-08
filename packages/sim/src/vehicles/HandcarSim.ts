@@ -23,13 +23,14 @@ export class HandcarSim {
   /** inputs: each seated player's latest input and stamina; returns stamina spent per seat. */
   step(
     dt: number,
-    inputs: Array<{ seat: number; input: InputFrame | null; stamina: number }>,
+    inputs: Array<{ seat: number; input: InputFrame | null; stamina: number; power?: number }>,
   ): number[] {
     let pump = 0;
     let pumpers = 0;
     let brake = false;
     const spent = [0, 0, 0, 0];
-    for (const { seat, input, stamina } of inputs) {
+    let effort = 0;
+    for (const { seat, input, stamina, power = 1 } of inputs) {
       if (!input) continue;
       if (input.buttons & Btn.Jump) brake = true;
       const dir = input.my > 0.25 ? 1 : input.my < -0.25 ? -1 : 0;
@@ -40,9 +41,15 @@ export class HandcarSim {
       const facing = seat >= 2 ? -1 : 1;
       pump += (dir || 1) * facing;
       pumpers++;
+      effort += power;
       spent[seat] = HANDCAR.pumpStamina * dt;
     }
-    const top = HANDCAR.speeds[Math.min(pumpers, 4)] ?? 0;
+    // Top speed follows the pumping effort (an Engineer counts for 1.25, §4.11).
+    const e = Math.min(effort, 4);
+    const lo = Math.floor(e);
+    const top =
+      (HANDCAR.speeds[lo] ?? 0) +
+      ((HANDCAR.speeds[Math.min(4, lo + 1)] ?? 0) - (HANDCAR.speeds[lo] ?? 0)) * (e - lo);
     const want = pumpers ? Math.sign(pump) * top : 0;
     if (brake) this.speed = approach(this.speed, 0, HANDCAR.brakeDecel * dt);
     else if (pumpers && Math.abs(pump) > 0) {

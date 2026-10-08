@@ -75,6 +75,8 @@ export const PlayerState = schema(
     /** Item id and kind carried in both hands ('' if none). */
     carry: t.string(),
     carryKind: t.string(),
+    /** Class (index into CLASS_IDS). */
+    cls: t.uint8(),
     inv: t.ref(InventoryState).view(ViewTag.Owner),
   },
   'PlayerState',
@@ -252,7 +254,35 @@ export const RunState = schema(
     winch: t.float32(),
     /** Set when the run ends (§4.1 results). */
     result: t.string(),
+    /** The dev panel was used this run (no bonds, §12). */
+    dev: t.boolean(),
   },
   'RunState',
 );
 export type RunState = SchemaType<typeof RunState>;
+
+/** One player waiting in a lobby. */
+export const LobbyMember = schema(
+  {
+    name: t.string(),
+    /** Class id (see CLASS_IDS). */
+    cls: t.string(),
+    ready: t.boolean(),
+  },
+  'LobbyMember',
+);
+export type LobbyMember = SchemaType<typeof LobbyMember>;
+
+/** Party formation before a run (§6.8 LobbyRoom). */
+export const LobbyState = schema(
+  {
+    code: t.string(),
+    /** Session id of the party leader (starts the run). */
+    host: t.string(),
+    members: t.map(LobbyMember),
+    /** Run room id once the run has started ('' before). */
+    runId: t.string(),
+  },
+  'LobbyState',
+);
+export type LobbyState = SchemaType<typeof LobbyState>;

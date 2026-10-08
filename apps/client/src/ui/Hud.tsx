@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
+import { PINGS } from '@dead-tracks/shared';
+import { PING_ICONS } from '../gameplay/Pings.ts';
 import { hud } from './hudStore.ts';
 
 function useTick(ms: number): void {
@@ -113,6 +115,17 @@ function Results({ onLeave }: { onLeave: () => void }) {
         <dd>{r.bounties}</dd>
         <dt>Kills</dt>
         <dd>{r.kills}</dd>
+        <dt>Bonds earned</dt>
+        <dd data-testid="bonds-earned">
+          {hud.bondsEarned >= 0 ? `◈ ${hud.bondsEarned}` : '…'}
+          {r.dev ? ' (dev run)' : ''}
+        </dd>
+        {hud.bondsTotal >= 0 && (
+          <>
+            <dt>Bonds total</dt>
+            <dd>◈ {hud.bondsTotal}</dd>
+          </>
+        )}
       </dl>
       <button data-testid="results-leave" onClick={onLeave}>
         Back to the menu
@@ -161,6 +174,31 @@ export function Hud({ onMenu, onLeave }: { onMenu: () => void; onLeave: () => vo
         </div>
       </div>
 
+      {hud.pingWheel.open && (
+        <div class="ping-wheel" data-testid="ping-wheel">
+          {PINGS.slice(0, 6).map((label, i) => {
+            const a = (i / 6) * Math.PI * 2;
+            return (
+              <div
+                key={label}
+                class={hud.pingWheel.sel === i ? `wedge ping-${i} on` : `wedge ping-${i}`}
+                style={{ left: `${50 + Math.sin(a) * 38}%`, top: `${50 - Math.cos(a) * 38}%` }}
+              >
+                <i>{PING_ICONS[i]}</i>
+                {label}
+              </div>
+            );
+          })}
+          <div class="hub">{hud.pingWheel.sel < 0 ? 'Release to mark' : ''}</div>
+        </div>
+      )}
+      {hud.subs.length > 0 && (
+        <div class="subtitles" data-testid="subtitles">
+          {hud.subs.map((x) => (
+            <div key={x.id}>{x.text}</div>
+          ))}
+        </div>
+      )}
       {hud.objective && (
         <div class="objective" data-testid="objective">
           {hud.objective}
@@ -307,6 +345,7 @@ export function Hud({ onMenu, onLeave }: { onMenu: () => void; onLeave: () => vo
       )}
 
       <div class="vitals">
+        {hud.className && <span class="class-tag">{hud.className}</span>}
         <Bar value={hud.hp} max={100} cls="hp" />
         <Bar value={hud.stamina} max={100} cls="stamina" />
       </div>

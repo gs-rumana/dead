@@ -5,3 +5,4 @@ export * from './worldgen/index.ts';
 export * from './vehicles/index.ts';
 export * from './movement/index.ts';
 export * from './combat/index.ts';
+export * from './meta/index.ts';

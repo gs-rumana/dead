@@ -962,7 +962,7 @@ button.secondary {
 
 .objective {
   position: absolute;
-  top: 64px;
+  top: 92px;
   left: 50%;
   transform: translateX(-50%);
   padding: 6px 14px;
@@ -975,7 +975,7 @@ button.secondary {
 
 .boss {
   position: absolute;
-  top: 100px;
+  top: 128px;
   left: 50%;
   transform: translateX(-50%);
   width: min(460px, 80vw);
@@ -1036,4 +1036,458 @@ button.secondary {
   margin: 0;
   text-align: right;
   font-weight: 650;
+}
+
+/* ---------------- M7: menu, accounts, lobby, settings ---------------- */
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+button.small {
+  padding: 0.35em 0.8em;
+  font-size: 13px;
+}
+
+button.link {
+  background: none;
+  color: var(--accent);
+  padding: 0;
+  font-weight: 600;
+  text-decoration: underline dotted;
+}
+
+.dim {
+  color: var(--ink-dim);
+  font-size: 13px;
+}
+
+.gate-text {
+  max-width: 30rem;
+  text-align: center;
+  line-height: 1.5;
+  margin: 0 0 1rem;
+}
+
+.menu.main {
+  justify-content: flex-start;
+  overflow-y: auto;
+  padding: max(24px, env(safe-area-inset-top)) 16px 24px;
+}
+
+.menu.main h1 {
+  margin-top: 2vh;
+}
+
+.menu-body {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+  justify-content: center;
+  flex-wrap: wrap;
+  width: min(1040px, 100%);
+}
+
+.menu-col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1 1 520px;
+  max-width: 640px;
+}
+
+.menu-col.actions {
+  flex: 0 1 260px;
+  align-items: stretch;
+}
+
+.card {
+  background: rgba(31, 24, 18, 0.92);
+  border: 1px solid #5a4632;
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.profile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.profile-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.profile .name {
+  font-size: 18px;
+  text-decoration: none;
+}
+
+.bonds {
+  font-weight: 700;
+  color: var(--accent);
+  font-size: 18px;
+}
+
+.name-edit {
+  display: flex;
+  gap: 6px;
+}
+
+.menu .name-edit input {
+  width: 12em;
+  letter-spacing: 0;
+  text-transform: none;
+  text-align: left;
+}
+
+.classes {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.card.class {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  cursor: pointer;
+  pointer-events: auto;
+  font-size: 13px;
+}
+
+.card.class b {
+  font-family: Georgia, serif;
+  font-size: 16px;
+  color: var(--ink);
+}
+
+.card.class .kit {
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.card.class ul {
+  margin: 2px 0 4px;
+  padding-left: 16px;
+  color: var(--ink-dim);
+}
+
+.card.class.picked {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent) inset;
+}
+
+.card.class.locked {
+  opacity: 0.75;
+  cursor: default;
+}
+
+.lobby .party-box {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.lobby .code {
+  font-family: ui-monospace, monospace;
+  font-size: 34px;
+  letter-spacing: 0.25em;
+  color: var(--accent);
+}
+
+.lobby .members {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  width: min(460px, 92vw);
+  display: grid;
+  gap: 6px;
+}
+
+.lobby .members li {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(31, 24, 18, 0.9);
+}
+
+.lobby .members li .tag {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #3a2d22;
+}
+
+.lobby .members li .ready {
+  margin-left: auto;
+  color: var(--ink-dim);
+}
+
+.lobby .members li .ready.on {
+  color: #8fc27a;
+}
+
+.lobby .classes {
+  width: min(980px, 96vw);
+}
+
+.panel.wide {
+  width: min(520px, 94vw);
+}
+
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings .tabs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.settings .tab {
+  background: #2a2119;
+  color: var(--ink-dim);
+  padding: 0.35em 0.8em;
+  font-size: 13px;
+}
+
+.settings .tab.on {
+  background: var(--accent);
+  color: var(--paper);
+}
+
+.settings .keys {
+  display: grid;
+  gap: 4px;
+}
+
+.settings .key-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+}
+
+.settings .key {
+  min-width: 8em;
+  background: #2a2119;
+  color: var(--ink);
+  padding: 0.3em 0.6em;
+  font-size: 13px;
+}
+
+.settings .key.listening {
+  background: var(--accent);
+  color: var(--paper);
+}
+
+.settings .fixed {
+  color: var(--ink-dim);
+}
+
+/* ---------------- M7: in-run markers, compass, pings, subtitles ---------------- */
+#overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.markers {
+  position: absolute;
+  inset: 0;
+}
+
+.marker {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: -14px 0 0 -60px;
+  width: 120px;
+  font: 600 12px ui-sans-serif, system-ui, sans-serif;
+  color: #fff;
+  text-shadow: 0 1px 2px #000, 0 0 4px #000;
+  will-change: transform;
+}
+
+.marker i {
+  font-style: normal;
+  font-size: 18px;
+  width: 26px;
+  height: 26px;
+  line-height: 26px;
+  text-align: center;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.45);
+  border: 2px solid currentColor;
+}
+
+.marker span {
+  font-weight: 400;
+  opacity: 0.85;
+}
+
+.marker.valuable {
+  color: #f3cf5a;
+}
+
+.marker.valuable i {
+  font-size: 13px;
+  width: 18px;
+  height: 18px;
+  line-height: 16px;
+}
+
+.marker.downed {
+  color: #ff6b5a;
+}
+
+/* Ping colours; the colourblind set (Okabe-Ito) also differs by icon. */
+.ping-0 { color: #f0a63a; }
+.ping-1 { color: #ff5a4a; }
+.ping-2 { color: #ffd54a; }
+.ping-3 { color: #7fd36a; }
+.ping-4 { color: #e2453a; }
+.ping-5 { color: #6ac8ff; }
+.ping-6 { color: #ffffff; }
+.cb .ping-0 { color: #e69f00; }
+.cb .ping-1 { color: #d55e00; }
+.cb .ping-2 { color: #f0e442; }
+.cb .ping-3 { color: #009e73; }
+.cb .ping-4 { color: #cc79a7; }
+.cb .ping-5 { color: #56b4e9; }
+.cb .marker.downed { color: #d55e00; }
+
+.compass {
+  position: absolute;
+  top: calc(max(10px, env(safe-area-inset-top)) + 40px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(460px, 60vw);
+  height: 24px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.25);
+  background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.35) 15%, rgba(0, 0, 0, 0.35) 85%, transparent);
+  font: 600 12px ui-sans-serif, system-ui, sans-serif;
+  color: var(--ink-dim);
+}
+
+.compass::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  border: 4px solid transparent;
+  border-bottom-color: var(--accent);
+  transform: translateX(-50%) rotate(180deg);
+}
+
+.compass .cdir,
+.compass .cmark {
+  position: absolute;
+  top: 4px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+.compass .cdir.major {
+  color: var(--ink);
+}
+
+.compass .cmark {
+  top: 2px;
+  font-size: 15px;
+  text-shadow: 0 1px 2px #000;
+}
+
+.compass .cmark.station,
+.compass .cmark.junction {
+  color: #d9c7a3;
+}
+
+.compass .cmark.landmark {
+  color: #e07a52;
+}
+
+.compass .cmark.fort {
+  color: #fff;
+}
+
+.ping-wheel {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 280px;
+  height: 280px;
+  margin: -140px 0 0 -140px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(0, 0, 0, 0.15) 0 22%, rgba(16, 12, 9, 0.7) 23% 70%, transparent 71%);
+}
+
+.ping-wheel .wedge {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-weight: 650;
+  font-size: 12px;
+  text-shadow: 0 1px 2px #000;
+  opacity: 0.75;
+}
+
+.ping-wheel .wedge i {
+  font-style: normal;
+  font-size: 20px;
+}
+
+.ping-wheel .wedge.on {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1.25);
+}
+
+.ping-wheel .hub {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+.subtitles {
+  position: absolute;
+  left: 50%;
+  bottom: 120px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.subtitles div {
+  padding: 2px 10px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.65);
+  font-size: 15px;
+}
+
+.class-tag {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
 }

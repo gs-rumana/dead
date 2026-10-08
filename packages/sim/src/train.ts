@@ -26,6 +26,8 @@ export class TrainSim {
   devSpeedScale = 1;
   /** A shut gate ahead (Fort Haven): the train can't pass this s. */
   limitS = Infinity;
+  /** Fuel burn multiplier (an Engineer aboard burns 20% less, §4.11). */
+  burnScale = 1;
 
   constructor(startS: number) {
     this.s = startS;
@@ -96,7 +98,7 @@ export class TrainSim {
     const work = this.throttle * (0.35 + (0.65 * Math.abs(this.speed)) / TRAIN.maxSpeed);
     const burn =
       TRAIN.burnAtCruise * (TRAIN.idleBurnFraction + (1 - TRAIN.idleBurnFraction) * work);
-    this.fuel = Math.max(0, this.fuel - burn * dt);
+    this.fuel = Math.max(0, this.fuel - burn * this.burnScale * dt);
     if (this.fuel > 0) this.pressure = Math.min(1, this.pressure + TRAIN.pressureRise * dt);
     else this.pressure = Math.max(0, this.pressure - TRAIN.pressureFall * dt);
     this.stokeCooldown = Math.max(0, this.stokeCooldown - dt);

@@ -474,6 +474,27 @@ export class AudioEngine {
     });
   }
 
+  /** A teammate's ping: two quick bell tones. */
+  ping(): void {
+    const c = this.ctx;
+    const t = c.currentTime;
+    for (const [f, at] of [
+      [1320, 0],
+      [1760, 0.09],
+    ] as const) {
+      const o = c.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = f;
+      const g = c.createGain();
+      g.gain.setValueAtTime(0, t + at);
+      g.gain.linearRampToValueAtTime(0.18, t + at + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + at + 0.35);
+      o.connect(g).connect(this.effects);
+      o.start(t + at);
+      o.stop(t + at + 0.4);
+    }
+  }
+
   /** UI click / pickup tick. */
   tick(): void {
     this.burst(this.effects, { freq: 3000, q: 3, attack: 0.001, decay: 0.03, gain: 0.15 });

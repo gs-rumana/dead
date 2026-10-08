@@ -5,6 +5,18 @@ services:
     restart: unless-stopped
     environment:
       - PORT=2567
+      - REGION=eu
+      # Accounts (§4.12): a long random secret, and where the client and this server live.
+      - JWT_SECRET=${JWT_SECRET}
+      - CLIENT_URL=${CLIENT_URL}
+      - PUBLIC_URL=https://${SERVER_DOMAIN}
+      # Optional sign-in providers: leave empty to hide a button.
+      - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID:-}
+      - DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET:-}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
     volumes:
       - ./data:/app/data
     expose:

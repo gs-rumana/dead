@@ -7,6 +7,10 @@ import {
   HEADSHOT_MULTIPLIER,
   LIMB_MULTIPLIER,
   type MeleeDef,
+  PERKS,
+  hipSpreadFor,
+  magazineFor,
+  reloadTimeFor,
   PLAYER,
   type ThrowDef,
   WEAPONS,
@@ -63,15 +67,16 @@ export class Combat {
         const gun = heldGun(inv);
         if (!gun) return;
         const slot = inv.selected;
-        const need = gun.magazine - (inv.mags[slot] ?? 0);
+        const mag = magazineFor(p.cls, gun);
+        const need = mag - (inv.mags[slot] ?? 0);
         const got = takeReserve(inv, gun, gun.reloadPerRound ? Math.min(1, need) : need);
         inv.mags[slot] = (inv.mags[slot] ?? 0) + got;
         if (
           gun.reloadPerRound &&
-          (inv.mags[slot] ?? 0) < gun.magazine &&
+          (inv.mags[slot] ?? 0) < mag &&
           reserveFor(inv, gun) > 0
         ) {
-          inv.reload = gun.reloadTime;
+          inv.reload = reloadTimeFor(p.cls, gun);
         }
       }
     }
@@ -81,8 +86,8 @@ export class Combat {
     const inv = p.inv;
     const gun = heldGun(inv);
     if (!gun || inv.reload > 0 || p.life !== 0) return;
-    if ((inv.mags[inv.selected] ?? 0) >= gun.magazine || reserveFor(inv, gun) <= 0) return;
-    inv.reload = gun.reloadTime;
+    if ((inv.mags[inv.selected] ?? 0) >= magazineFor(p.cls, gun) || reserveFor(inv, gun) <= 0) return;
+    inv.reload = reloadTimeFor(p.cls, gun);
   }
 
   equip(p: SimPlayer, slot: number): void {
@@ -133,7 +138,7 @@ export class Combat {
       dx,
       dy,
       dz,
-      cmd.aim ? gun.aimSpread : gun.hipSpread,
+      cmd.aim ? gun.aimSpread : hipSpreadFor(p.cls, gun),
       gun.pellets,
       shotSeed(cmd.seq),
     );
@@ -156,7 +161,7 @@ export class Combat {
       const falloff = gun.pellets > 1 ? clamp(1.25 - result.t / gun.range, 0.35, 1) : 1;
       const mult =
         result.zone === Zone.Head
-          ? HEADSHOT_MULTIPLIER
+          ? HEADSHOT_MULTIPLIER * (p.cls === 'gunslinger' ? PERKS.gunslingerHeadshot : 1)
           : result.zone === Zone.Limb
             ? LIMB_MULTIPLIER
             : 1;
@@ -219,6 +224,12 @@ export class Combat {
   ): void {
     const sim = this.sim;
     if (e.state === 'dead') return;
+    // Preachers hit the night's hunters harder (§4.11).
+    if (
+      (e.type === 'werewolf' || e.type === 'vampire' || e.type === 'countess') &&
+      sim.players.get(by)?.cls === 'preacher'
+    )
+      dmg *= PERKS.preacherHoly;
     e.hp -= dmg;
     // Gore (§4.7): heads pop on lethal headshots, strong hits take limbs.
     if (zone === Zone.Head && e.hp <= 0) e.gore |= GoreBit.Head;

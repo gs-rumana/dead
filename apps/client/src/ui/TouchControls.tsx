@@ -10,10 +10,13 @@ export function TouchControls({
   input,
   onSwap,
   onHeal,
+  onPing,
 }: {
   input: Input;
   onSwap: () => void;
   onHeal: () => void;
+  /** Ping button: tap marks the crosshair; hold and drag to pick from the wheel (§4.14). */
+  onPing: (down: boolean) => void;
 }) {
   const [stick, setStick] = useState<{ x: number; y: number; dx: number; dy: number } | null>(null);
   const stickId = useRef<number | null>(null);
@@ -188,6 +191,21 @@ export function TouchControls({
           }}
         >
           Heal
+        </button>
+        <button
+          class="tb small"
+          data-testid="touch-ping"
+          onPointerDown={(e) => {
+            e.stopPropagation();
+            onPing(true);
+          }}
+          onPointerUp={(e) => {
+            e.stopPropagation();
+            onPing(false);
+          }}
+          onPointerCancel={() => onPing(false)}
+        >
+          Ping
         </button>
         <button class={hud.prompt ? 'tb use ready' : 'tb use'} {...hold(Btn.Interact)}>
           Use

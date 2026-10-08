@@ -16,6 +16,9 @@ FROM node:24-slim
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app/apps/server/dist ./dist
+# The SQLite database and the JWT secret live here (mount a volume, §9).
+RUN mkdir -p /app/data && chown node:node /app/data
+ENV DATA_DIR=/app/data
 USER node
 EXPOSE 2567
 CMD ["node", "--enable-source-maps", "dist/server.js"]

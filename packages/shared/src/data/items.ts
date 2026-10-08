@@ -21,6 +21,7 @@ export type ItemKind =
   | 'bounty'
   | 'trolley_kit'
   | 'cellar_key'
+  | 'bond'
   | 'ammo_pistol'
   | 'ammo_rifle'
   | 'ammo_shells'
@@ -88,6 +89,8 @@ export const ITEMS: Record<ItemKind, ItemDef> = {
   bounty: d('bounty', "Outlaw's badge", 'valuable', 0, 30),
   /** Grayson Ranch's cellar key (§4.6 puzzle). Worthless to traders. */
   cellar_key: d('cellar_key', 'Cellar key', 'valuable', 0, 0),
+  /** A railroad bond: no trader wants it, but it's worth bonds at the end of a run (§4.10). */
+  bond: d('bond', 'Railroad bond', 'valuable', 0, 0),
   /** A cargo trolley for the handcar (§4.4): bought or found, hitched at a junction. */
   trolley_kit: d('trolley_kit', 'Trolley', 'bulky', 0, 30, { carrySpeed: 0.6 }),
   ammo_pistol: d('ammo_pistol', 'Pistol rounds', 'ammo', 0, 6, { rounds: 12 }),
@@ -216,6 +219,7 @@ export const LOOT = {
     ['gold_nugget', 3],
     ['jewelry', 3],
     ['cash', 3],
+    ['bond', 1],
   ],
   body: [
     ['cash', 3],

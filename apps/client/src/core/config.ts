@@ -5,7 +5,7 @@ export const config = {
   /** Force the WebGL2 backend (debugging, old devices). */
   forceWebGL: params.get('renderer') === 'webgl',
   /** Start straight into a mode, for tests and invite links. */
-  autostart: params.get('autostart') as 'solo' | 'host' | 'join' | null,
+  autostart: params.get('autostart') as 'solo' | 'host' | 'join' | 'lobby' | null,
   seed: params.has('seed') ? Number(params.get('seed')) >>> 0 : undefined,
   name: params.get('name') ?? undefined,
   perfHud: params.has('perf') || import.meta.env.DEV,

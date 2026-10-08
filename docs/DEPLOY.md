@@ -25,12 +25,28 @@ Solo play works as soon as the website is up; it doesn't need the game server.
    # copy deploy/docker-compose.yml and deploy/Caddyfile here, then:
    echo "SERVER_DOMAIN=deadtracks.duckdns.org" > .env
    echo "GITHUB_OWNER=<your-github-user>" >> .env
+   echo "JWT_SECRET=$(openssl rand -base64 48)" >> .env
+   echo "CLIENT_URL=https://dead-tracks.pages.dev" >> .env
    docker compose up -d
    ```
    Also open the ports in Ubuntu's own firewall: `sudo iptables -I INPUT -p tcp -m multiport --dports 80,443 -j ACCEPT` and save with `netfilter-persistent`.
 7. In GitHub add secrets `VM_HOST`, `VM_USER` and `VM_SSH_KEY` (a deploy key whose public half is in `~/.ssh/authorized_keys` on the VM).
 
 Check it: `https://<your-hostname>/health` should return `{"ok":true,...}`, and `/metrics` shows rooms, players and tick times.
+
+## Accounts and sign-in (§4.12)
+
+Accounts live in a SQLite file in `./data` on the VM (back it up nightly, for example with a cron job copying `data/dead-tracks.db`). Guests work with no setup. Each sign-in provider is optional: set its two variables in `.env` and restart, and its button appears in the menu.
+
+| Provider | Where to register the app | Redirect URL to enter |
+|---|---|---|
+| Discord | discord.com/developers/applications → OAuth2 | `https://<SERVER_DOMAIN>/auth/discord/callback` |
+| Google | console.cloud.google.com → APIs & Services → Credentials → OAuth client (Web) | `https://<SERVER_DOMAIN>/auth/google/callback` |
+| GitHub | github.com/settings/developers → OAuth Apps | `https://<SERVER_DOMAIN>/auth/github/callback` |
+
+Then add `DISCORD_CLIENT_ID`/`DISCORD_CLIENT_SECRET` (and the same for `GOOGLE_` and `GITHUB_`) to `.env`. Only the provider's user id and display name are stored (§10).
+
+The public server runs with `NODE_ENV=production`: the dev panel's commands and the "Dev" sign-in are refused there.
 
 ## Development server from your Mac
 

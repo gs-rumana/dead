@@ -130,6 +130,19 @@ function build(kind: ItemKind): THREE.BufferGeometry {
       b.cylinder('copper', 0, 0.08, 0, 0.045, 0.05, 0.16, 7);
       b.cylinder('woodDark', 0, 0.18, 0, 0.02, 0.02, 0.05, 5);
       break;
+    case 'bond':
+      // A rolled certificate tied with a red ribbon.
+      b.cylinder('white', 0, 0.035, 0, 0.035, 0.035, 0.24, 8, { rz: Math.PI / 2 });
+      b.cylinder('signRed', 0, 0.035, 0, 0.038, 0.038, 0.03, 8, { rz: Math.PI / 2 });
+      break;
+    case 'cellar_key':
+      b.cylinder('brass', -0.06, 0.012, 0, 0.03, 0.03, 0.012, 10);
+      b.box('brass', 0.03, 0.012, 0, 0.13, 0.012, 0.02);
+      b.box('brass', 0.08, 0.012, 0.02, 0.02, 0.012, 0.03);
+      break;
+    case 'bounty':
+      b.cylinder('brass', 0, 0.01, 0, 0.05, 0.05, 0.01, 5);
+      break;
     default: {
       // Weapons and throwables reuse their held models, laid flat.
       const w = weaponModel(kind);

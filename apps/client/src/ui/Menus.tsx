@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { Game } from '../core/Game.ts';
-import type { QualityTier } from '../core/quality.ts';
-import { saveSettings } from '../core/settings.ts';
+import { SettingsPanel } from './Settings.tsx';
 import { netSim } from '../net/NetSim.ts';
 
 /** Esc menu: settings (§4.15) and leaving the run. */
@@ -14,115 +13,15 @@ export function PauseMenu({
   onClose: () => void;
   onLeave: () => void;
 }) {
-  const s = game.settings;
-  const [, force] = useState(0);
-  const update = (patch: Partial<typeof s>) => {
-    Object.assign(s, patch);
-    saveSettings(s);
-    game.applySettings();
-    force((x) => x + 1);
-  };
   return (
     <div
       class="overlay interactive"
       data-testid="pause-menu"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >
-      <div class="panel">
+      <div class="panel wide">
         <h2>Paused</h2>
-        <label>
-          Graphics
-          <select
-            value={s.quality}
-            onChange={(e) =>
-              update({ quality: (e.target as HTMLSelectElement).value as QualityTier | 'auto' })
-            }
-          >
-            <option value="auto">Auto ({game.quality.tier})</option>
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-          </select>
-        </label>
-        <label>
-          Frame rate cap
-          <select
-            value={String(s.fpsCap)}
-            onChange={(e) =>
-              update({ fpsCap: Number((e.target as HTMLSelectElement).value) as 30 | 60 })
-            }
-          >
-            <option value="30">30 fps</option>
-            <option value="60">60 fps</option>
-          </select>
-        </label>
-        <label>
-          Field of view <span>{s.fov}°</span>
-          <input
-            type="range"
-            min="55"
-            max="95"
-            value={s.fov}
-            onInput={(e) => update({ fov: Number((e.target as HTMLInputElement).value) })}
-          />
-        </label>
-        <label>
-          Look sensitivity <span>{s.sensitivity.toFixed(2)}</span>
-          <input
-            type="range"
-            min="0.2"
-            max="3"
-            step="0.05"
-            value={s.sensitivity}
-            onInput={(e) => update({ sensitivity: Number((e.target as HTMLInputElement).value) })}
-          />
-        </label>
-        <label class="check">
-          <input
-            type="checkbox"
-            checked={s.invertY}
-            onChange={(e) => update({ invertY: (e.target as HTMLInputElement).checked })}
-          />{' '}
-          Invert Y
-        </label>
-        <label>
-          Master volume <span>{Math.round(s.masterVolume * 100)}%</span>
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.05"
-            value={s.masterVolume}
-            onInput={(e) => update({ masterVolume: Number((e.target as HTMLInputElement).value) })}
-          />
-        </label>
-        <label>
-          Effects volume <span>{Math.round(s.effectsVolume * 100)}%</span>
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.05"
-            value={s.effectsVolume}
-            onInput={(e) => update({ effectsVolume: Number((e.target as HTMLInputElement).value) })}
-          />
-        </label>
-        <label class="check">
-          <input
-            type="checkbox"
-            checked={s.cameraShake}
-            onChange={(e) => update({ cameraShake: (e.target as HTMLInputElement).checked })}
-          />{' '}
-          Camera shake
-        </label>
-        <label class="check">
-          <input
-            type="checkbox"
-            checked={s.gore}
-            onChange={(e) => update({ gore: (e.target as HTMLInputElement).checked })}
-          />{' '}
-          Gore
-        </label>
+        <SettingsPanel settings={game.settings} onChange={() => game.applySettings()} tier={game.quality.tier} />
         <div class="row">
           <button data-testid="resume" onClick={onClose}>
             Resume

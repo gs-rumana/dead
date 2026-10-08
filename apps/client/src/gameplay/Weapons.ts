@@ -13,6 +13,8 @@ import {
   rayVsEnemy,
   shotDirections,
   shotSeed,
+  type ClassId,
+  hipSpreadFor,
 } from '@dead-tracks/shared';
 import type { AudioEngine } from '../audio/AudioEngine.ts';
 import type { Connection } from '../net/Connection.ts';
@@ -34,6 +36,8 @@ export interface WeaponContext {
   inventory: () => InventoryState | undefined;
   alive: () => boolean;
   driving: () => boolean;
+  /** The local player's class (§4.11: Gunslingers have tighter hip fire). */
+  cls: () => ClassId;
 }
 
 const tmpDir = new THREE.Vector3();
@@ -164,12 +168,13 @@ export class Weapons {
     dz /= dl;
     const aim = this.aimT > 0.8;
     const seq = ++this.seq;
-    const spread = (aim ? gun.aimSpread : gun.hipSpread) * (1 + this.bloom * 0.6);
+    const hip = hipSpreadFor(ctx.cls(), gun);
+    const spread = (aim ? gun.aimSpread : hip) * (1 + this.bloom * 0.6);
     const pellets = shotDirections(
       dx,
       dy,
       dz,
-      aim ? gun.aimSpread : gun.hipSpread,
+      aim ? gun.aimSpread : hip,
       gun.pellets,
       shotSeed(seq),
     );

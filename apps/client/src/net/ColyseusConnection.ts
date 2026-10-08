@@ -41,8 +41,9 @@ export class ColyseusConnection implements Connection {
     return this.room.sessionId;
   }
 
+  /** The party code (the lobby's, for runs started from one). */
   get code(): string {
-    return this.room.roomId;
+    return this.room.state.code || this.room.roomId;
   }
 
   get stats() {

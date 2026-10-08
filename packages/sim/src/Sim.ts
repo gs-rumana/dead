@@ -22,8 +22,11 @@ import {
   Rng,
   Route,
   SIM_DT,
+  PINGS,
   World,
   type ItemKind,
+  type ClassId,
+  PERKS,
   HANDCAR,
   HANDCAR_SEATS,
   type HandcarPose,
@@ -58,6 +61,8 @@ import { TrainSim } from './train.ts';
 
 export interface SimOptions {
   seed: number;
+  /** Accept dev-panel commands (§12). Off on the public server. Default on. */
+  allowDev?: boolean;
 }
 
 export interface SimPlayer {
@@ -91,6 +96,13 @@ export interface SimPlayer {
   wz: number;
   /** Item id carried in both hands ('' if none, §4.8). */
   carry: string;
+  /** Class (§4.11). */
+  cls: ClassId;
+  /** Sim time of the last ping (rate limit). */
+  lastPing: number;
+  /** This run's tallies for the lifetime stats (§4.12). */
+  kills: number;
+  bounties: number;
 }
 
 export interface OutEvent {
@@ -141,6 +153,10 @@ export class Sim {
   devInfiniteFuel = false;
   /** Development only: players can't be hurt. */
   devGod = false;
+  /** Dev-panel commands are accepted (§12; never on the public server). */
+  readonly allowDev: boolean;
+  /** Someone used the dev panel this run (no bonds for it). */
+  devUsed = false;
   private playerCounter = 0;
 
   /** Rapier must be loaded first; use Sim.create(). */
@@ -151,6 +167,7 @@ export class Sim {
     this.route = this.world.route;
     this.terrain = this.world.terrain;
     this.features = this.world.features;
+    this.allowDev = opts.allowDev ?? true;
     this.space = space(this.terrain);
     this.space.structureSource = (tx, tz) => this.world.structuresInTile(tx, tz);
     this.train = new TrainSim(TRAIN_START_S);
@@ -193,7 +210,7 @@ export class Sim {
     return 1 - smoothstep(0.96, 1, f);
   }
 
-  addPlayer(id: string, name: string): SimPlayer {
+  addPlayer(id: string, name: string, cls: ClassId = 'drifter'): SimPlayer {
     const n = this.players.size;
     const motor = makeMotorState();
     motor.frame = Frame.Train;
@@ -214,7 +231,7 @@ export class Sim {
       revivedBy: '',
       respawnS: 0,
       lastHurt: -999,
-      inv: starterInventory(false),
+      inv: starterInventory(false, cls),
       viewDelay: 0.1,
       inputs: [],
       lastInput: null,
@@ -224,6 +241,10 @@ export class Sim {
       wy: 0,
       wz: 0,
       carry: '',
+      cls,
+      lastPing: -99,
+      kills: 0,
+      bounties: 0,
     };
     this.players.set(id, p);
     this.updatePlayerWorld(p);
@@ -333,7 +354,22 @@ export class Sim {
       case 'respawn':
         if (p.life === Life.Alive) this.respawnOnTrain(p);
         break;
+      case 'ping': {
+        // Ping wheel (§4.14): rate limited, and only near the pinger.
+        const kind = Number(cmd.kind) | 0;
+        const x = Number(cmd.x);
+        const y = Number(cmd.y);
+        const z = Number(cmd.z);
+        if (kind < 0 || kind >= PINGS.length || !Number.isFinite(x + y + z)) break;
+        if (this.time - p.lastPing < 0.6 || Math.hypot(x - p.wx, z - p.wz) > 400) break;
+        p.lastPing = this.time;
+        const target = typeof cmd.target === 'string' ? cmd.target.slice(0, 12) : undefined;
+        this.events.push({ ev: { e: 'ping', by: p.id, kind, x, y, z, ...(target ? { target } : {}) } });
+        break;
+      }
       case 'dev':
+        if (!this.allowDev) break;
+        this.devUsed = true;
         if (cmd.action === 'tp' && Number.isFinite(cmd.x) && Number.isFinite(cmd.z))
           this.devTeleport(p, cmd.x!, cmd.y ?? NaN, cmd.z!);
         else this.devCommand(p, cmd.action, cmd.value);
@@ -593,6 +629,11 @@ export class Sim {
       this.train.pressure = 1;
     }
     this.train.limitS = this.forts.trainLimit;
+    // An Engineer aboard keeps the fire lean (§4.11).
+    let engineer = false;
+    for (const q of this.players.values())
+      if (q.cls === 'engineer' && q.connected && q.life === Life.Alive) engineer = true;
+    this.train.burnScale = engineer ? PERKS.engineerBurn : 1;
     this.train.step(dt, this.route);
     this.updateTrainPose();
     this.stepHandcars(dt);
@@ -627,7 +668,12 @@ export class Sim {
 
   private stepHandcars(dt: number): void {
     this.handcars.forEach((hc, i) => {
-      const inputs: Array<{ seat: number; input: InputFrame | null; stamina: number }> = [];
+      const inputs: Array<{
+        seat: number;
+        input: InputFrame | null;
+        stamina: number;
+        power: number;
+      }> = [];
       hc.seats.forEach((id, seat) => {
         const p = id ? this.players.get(id) : undefined;
         if (!p) {
@@ -638,6 +684,7 @@ export class Sim {
           seat,
           input: p.connected && p.life === Life.Alive ? p.lastInput : null,
           stamina: p.motor.stamina,
+          power: p.cls === 'engineer' ? PERKS.engineerPump : 1,
         });
       });
       const spent = hc.step(dt, inputs);
@@ -858,13 +905,14 @@ export class Sim {
       }
       return;
     }
-    o.revive += dt / SURVIVAL.reviveTime;
+    o.revive += (dt / SURVIVAL.reviveTime) * (p.cls === 'medic' ? PERKS.medicRevive : 1);
     o.revivedBy = p.id;
     if (o.revive >= 1) {
       const tonic = p.inv.bandage <= 0;
       if (tonic) p.inv.tonic--;
       else p.inv.bandage--;
-      this.revive(o, tonic ? SURVIVAL.tonicRevive : SURVIVAL.bandageRevive, p.id);
+      const k = p.cls === 'medic' ? PERKS.medicHeal : 1;
+      this.revive(o, Math.min(100, (tonic ? SURVIVAL.tonicRevive : SURVIVAL.bandageRevive) * k), p.id);
     }
   }
 
@@ -891,12 +939,13 @@ export class Sim {
     }
     if (p.life !== Life.Alive || p.hp >= 100) return;
     const useTonic = p.inv.tonic > 0 && (p.hp < 40 || p.inv.bandage <= 0);
+    const k = p.cls === 'medic' ? PERKS.medicHeal : 1;
     if (useTonic) {
       p.inv.tonic--;
-      p.hp = Math.min(100, p.hp + SURVIVAL.tonicHeal);
+      p.hp = Math.min(100, p.hp + SURVIVAL.tonicHeal * k);
     } else if (p.inv.bandage > 0) {
       p.inv.bandage--;
-      p.hp = Math.min(100, p.hp + SURVIVAL.bandageHeal);
+      p.hp = Math.min(100, p.hp + SURVIVAL.bandageHeal * k);
     }
   }
 
@@ -951,7 +1000,11 @@ export class Sim {
 
   killEnemy(e: SimEnemy, by: string, _zone: number, byTrain: boolean): void {
     if (e.state === 'dead') return;
-    if (by && by !== 'train') this.forts.kills++;
+    if (by && by !== 'train') {
+      this.forts.kills++;
+      const killer = this.players.get(by);
+      if (killer) killer.kills++;
+    }
     e.hp = 0;
     e.state = 'dead';
     e.deadT = 0;

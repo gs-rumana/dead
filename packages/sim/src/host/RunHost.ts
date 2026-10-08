@@ -17,7 +17,14 @@ import {
   RunState,
   ViewTag,
   SIM_DT,
+  CLASS_IDS,
+  type ClassId,
+  type LifetimeStats,
+  type RunAward,
+  WORLD,
+  bondsFor,
   inputFromWire,
+  isClassId,
 } from '@dead-tracks/shared';
 import { Sim, type SimPlayer } from '../Sim.ts';
 import type { Inventory } from '../combat/inventory.ts';
@@ -37,6 +44,26 @@ export interface HostClient {
 export interface RunHostOptions {
   seed: number;
   code: string;
+  /** Accept dev-panel commands (never on the public server). */
+  allowDev?: boolean;
+}
+
+/** A verified account joining (the room checks the token, §4.12). */
+export interface AccountInfo {
+  userId: string;
+  name: string;
+  classes: ClassId[];
+}
+
+/** Bonds and stats owed to one account when they leave or the run ends. */
+export interface AwardReport {
+  userId: string;
+  /** Bonds still owed (earned so far minus what was already paid this run). */
+  bonds: number;
+  award: RunAward;
+  /** Additions to the lifetime stats. */
+  stats: Partial<LifetimeStats>;
+  final: boolean;
 }
 
 /**
@@ -51,6 +78,12 @@ export class RunHost {
   private readonly visible = new Map<string, Set<string>>();
   private readonly visibleItems = new Map<string, Set<string>>();
   private viewTick = 0;
+  /** Accounts by client id, and bonds already paid per account this run. */
+  private readonly accounts = new Map<string, AccountInfo>();
+  private readonly paid = new Map<string, number>();
+  private settled = false;
+  /** Called when bonds are owed: the room writes them to the database. */
+  onAward: ((r: AwardReport) => void) | null = null;
 
   private constructor(
     readonly sim: Sim,
@@ -63,22 +96,34 @@ export class RunHost {
   }
 
   static async create(opts: RunHostOptions): Promise<RunHost> {
-    return new RunHost(await Sim.create({ seed: opts.seed }), opts);
+    return new RunHost(await Sim.create({ seed: opts.seed, allowDev: opts.allowDev ?? true }), opts);
   }
 
   get playerCount(): number {
     return this.clients.size;
   }
 
-  join(client: HostClient, opts: JoinOptions): void {
+  join(client: HostClient, opts: JoinOptions, account?: AccountInfo): void {
     if (opts.protocol !== PROTOCOL_VERSION) {
       throw new Error(`protocol mismatch: client ${opts.protocol}, host ${PROTOCOL_VERSION}`);
     }
     this.clients.set(client.id, client);
-    const name = (opts.name ?? '').trim().slice(0, 20) || `Drifter ${this.clients.size}`;
-    this.sim.addPlayer(client.id, name);
+    const name =
+      account?.name || (opts.name ?? '').trim().slice(0, 20) || `Drifter ${this.clients.size}`;
+    // Classes must be unlocked on the account; without one only dev hosts allow any.
+    const want = isClassId(opts.cls) ? opts.cls : 'drifter';
+    const cls: ClassId = account
+      ? account.classes.includes(want) || want === 'drifter'
+        ? want
+        : 'drifter'
+      : this.sim.allowDev
+        ? want
+        : 'drifter';
+    this.sim.addPlayer(client.id, name, cls);
+    if (account) this.accounts.set(client.id, account);
     const ps = new PlayerState();
     ps.name = name;
+    ps.cls = CLASS_IDS.indexOf(cls);
     ps.inv = new InventoryState();
     this.state.players.set(client.id, ps);
     this.writeState();
@@ -120,6 +165,8 @@ export class RunHost {
   }
 
   leave(client: HostClient): void {
+    this.settle(client.id, false);
+    this.accounts.delete(client.id);
     this.clients.delete(client.id);
     this.visible.delete(client.id);
     this.visibleItems.delete(client.id);
@@ -155,6 +202,10 @@ export class RunHost {
   /** Advances the simulation one fixed tick and writes the result into the schema. */
   step(dt = SIM_DT): void {
     this.sim.step(dt);
+    if (this.sim.forts.result && !this.settled) {
+      this.settled = true;
+      for (const id of this.accounts.keys()) this.settle(id, true);
+    }
     this.writeState();
     this.updateViews(false);
     this.flushEvents();
@@ -244,6 +295,7 @@ export class RunHost {
     const wn = Math.round(sim.forts.winch * 100) / 100;
     if (state.winch !== wn) state.winch = wn;
     if (sim.forts.result && !state.result) state.result = JSON.stringify(sim.forts.result);
+    if (sim.devUsed && !state.dev) state.dev = true;
     state.weatherFrom = sim.weather.from;
     state.weatherTo = sim.weather.to;
     const wb = Math.round(sim.weather.blend * 100) / 100;
@@ -414,6 +466,51 @@ export class RunHost {
   dispose(): void {
     this.sim.dispose();
   }
+
+  /**
+   * Works out what a player has earned so far and reports what's still owed. A
+   * player who leaves early keeps their distance and landmarks; coming back to the
+   * same run can't earn the same bonds twice.
+   */
+  private settle(clientId: string, final: boolean): void {
+    const account = this.accounts.get(clientId);
+    const p = this.sim.players.get(clientId);
+    if (!account || !p || !this.onAward) return;
+    const sim = this.sim;
+    const result = sim.forts.result;
+    const award: RunAward = {
+      km: Math.min(WORLD.routeKm, sim.train.s / WORLD.metersPerKm),
+      won: final && !!result?.won,
+      landmarks: sim.forts.landmarks,
+      bondItems: p.inv.pack.filter((k) => k === 'bond').length,
+    };
+    // Dev-panel runs earn nothing (§12).
+    const earned = sim.devUsed ? 0 : bondsFor(award);
+    const already = this.paid.get(account.userId) ?? 0;
+    const bonds = Math.max(0, earned - already);
+    this.paid.set(account.userId, already + bonds);
+    const firstReport = already === 0 && !this.reported.has(account.userId);
+    this.reported.add(account.userId);
+    this.onAward({
+      userId: account.userId,
+      bonds,
+      award,
+      final,
+      stats: {
+        runs: firstReport ? 1 : 0,
+        wins: award.won ? 1 : 0,
+        bestKm: award.km,
+        kills: p.kills,
+        landmarks: final ? sim.forts.landmarks : 0,
+        bounties: p.bounties,
+        minutes: sim.time / 60,
+      },
+    });
+    p.kills = 0;
+    p.bounties = 0;
+  }
+
+  private readonly reported = new Set<string>();
 
   private flushEvents(): void {
     const out = this.sim.drainEvents();

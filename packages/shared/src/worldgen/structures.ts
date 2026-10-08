@@ -1081,6 +1081,7 @@ export function buildLandmark(
     for (let i = 0; i < 3; i++)
       k.spawns.push({ kind: 'gold_bar', x: 9 + rng.range(-1.2, 1.2), y: 0.1, z: 10 + rng.range(-1.2, 1.2), ry: 0 });
     k.spawns.push({ kind: 'strongbox', x: 9.4, y: 0, z: 11.4, ry: 0.5 });
+    k.spawns.push({ kind: 'bond', x: 7.2, y: 0.1, z: 8.6, ry: 0 });
     spec = {
       kind: 'ranch',
       gate,
@@ -1120,6 +1121,7 @@ export function buildLandmark(
         z: rng.range(-1.2, 1.2),
         ry: 0,
       });
+    k.spawns.push({ kind: 'bond', x: 11.5, y: 0.1, z: 1.2, ry: 0 });
     k.spawns.push({ kind: 'crate', x: 3, y: 0, z: 6, ry: 0.4 });
     k.spawns.push({ kind: 'lumber', x: 1, y: 0, z: -4, ry: 1.0 });
     spec = { kind: 'mine', gate, triggers, keyPiece: -1, boss: 'voss', bossX: 3, bossZ: 0 };
@@ -1153,6 +1155,7 @@ export function buildLandmark(
         z: 13 + rng.range(-1, 1),
         ry: 0,
       });
+    k.spawns.push({ kind: 'bond', x: 15.2, y: 0.1, z: 12, ry: 0 });
     for (let i = 0; i < 3; i++)
       k.spawns.push({ kind: 'chair', x: rng.range(-3, 3), y: 0.5, z: rng.range(-6, 6), ry: rng.range(0, 6) });
     spec = { kind: 'chateau', gate, triggers, keyPiece: -1, boss: 'countess', bossX: 8, bossZ: 10 };

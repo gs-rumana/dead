@@ -32,6 +32,13 @@ import {
   WEATHER_NAMES,
   Weather,
   isBoss,
+  CLASSES,
+  CLASS_IDS,
+  type ClassId,
+  PERKS,
+  PINGS,
+  bondsFor,
+  isBulky,
 } from '@dead-tracks/shared';
 import type { GameEvent } from '@dead-tracks/shared';
 import type { Connection } from '../net/Connection.ts';
@@ -40,6 +47,9 @@ import { paletteSkinnedMaterial } from '../render/materials.ts';
 import { type Humanoid, OUTFITS, createHumanoid } from '../render/models/humanoid.ts';
 import { Sky } from '../render/Sky.ts';
 import { WeatherFx } from '../render/WeatherFx.ts';
+import { PING_ICONS, Pings } from '../gameplay/Pings.ts';
+import { CompassStrip, type CompassMark, MarkerLayer } from '../ui/overlay.ts';
+import { account } from '../net/account.ts';
 import { CameraRig } from '../gameplay/CameraRig.ts';
 import { Effects } from '../gameplay/Effects.ts';
 import { EnemyView } from '../gameplay/EnemyView.ts';
@@ -57,7 +67,7 @@ import { ItemView } from '../gameplay/ItemView.ts';
 import { HandcarView } from '../gameplay/HandcarView.ts';
 import { type Target, findTarget } from '../gameplay/Interactions.ts';
 import { TrackStreamer } from '../world/TrackStreamer.ts';
-import { hud, toast } from '../ui/hudStore.ts';
+import { hud, subtitle, toast } from '../ui/hudStore.ts';
 import { AudioEngine } from '../audio/AudioEngine.ts';
 import { Input } from './Input.ts';
 import { config } from './config.ts';
@@ -108,6 +118,18 @@ export class Game {
   private space!: PhysicsSpace;
   private sky!: Sky;
   private weatherFx!: WeatherFx;
+  private pings!: Pings;
+  private markers!: MarkerLayer;
+  private compass!: CompassStrip;
+  /** Prospector's lantern (§4.11). Always in the scene: changing the light count recompiles shaders. */
+  private readonly lantern = new THREE.PointLight(0xffc77a, 0, 16, 1.6);
+  /** Touch ping button held (TouchControls). */
+  touchPing = false;
+  /** Solo runs claim their bonds from the server (§4.12). */
+  private soloRun: { id: string | null; claimed: boolean } = { id: null, claimed: false };
+  /** World positions of route features for the compass. */
+  private compassFeatures: Array<{ kind: string; name: string; x: number; z: number; s: number }> = [];
+  private lastShotSub = 0;
   private terrainStreamer!: TerrainStreamer;
   private trackStreamer!: TrackStreamer;
   private trainView!: TrainView;
@@ -182,6 +204,7 @@ export class Game {
     this.scene.add(this.sky.dome, this.sky.sun, this.sky.sun.target, this.sky.hemi);
     this.scene.fog = this.sky.fog;
     this.weatherFx = new WeatherFx(this.scene, this.sky, this.quality.tier === 'low');
+    this.scene.add(this.lantern);
 
     this.terrainStreamer = new TerrainStreamer(
       this.worldRoot,
@@ -227,7 +250,32 @@ export class Game {
       inventory: () => this.conn.state.players.get(this.conn.selfId)?.inv,
       alive: () => (this.conn.state.players.get(this.conn.selfId)?.life ?? 0) === Life.Alive,
       driving: () => this.local.motor.driving,
+      cls: () => this.myClass,
     });
+    this.pings = new Pings(
+      (kind, x, y, z, target) =>
+        this.conn.send('cmd', { t: 'ping', kind, x, y, z, ...(target ? { target } : {}) }),
+      this.camera,
+      () => ({ x: this.originX, z: this.originZ }),
+      this.space,
+      this.enemyView,
+    );
+    const overlay = document.getElementById('overlay') ?? document.body;
+    this.markers = new MarkerLayer(overlay);
+    this.compass = new CompassStrip(overlay);
+    // Route features for the compass strip (§4.15).
+    const tf = { x: 0, y: 0, z: 0, heading: 0, grade: 0, tx: 0, ty: 0, tz: 0, rx: 0, rz: 0 };
+    this.compassFeatures = this.world.features
+      .filter((f) => f.kind !== 'start')
+      .map((f) => {
+        const st =
+          f.kind === 'landmark' || f.kind === 'fort'
+            ? this.world.structures.find((x) => x.feature === f && (x.kind === 'landmark' || x.id === `f${f.index}`))
+            : undefined;
+        if (st) return { kind: f.kind, name: f.name, x: st.x, z: st.z, s: f.s };
+        this.route.frameAt(f.s, tf);
+        return { kind: f.kind, name: f.name, x: tf.x, z: tf.z, s: f.s };
+      });
 
     this.applyQuality();
     // §6.9: a short benchmark after the world has streamed in can lower the tier.
@@ -282,9 +330,44 @@ export class Game {
     this.running = true;
     this.last = performance.now();
     this.renderer.setAnimationLoop(this.frame);
+    // Solo runs happen in this browser: the server notes the start so the claim can be checked.
+    if (this.conn.kind === 'solo')
+      void account.soloStart(this.conn.state.seed).then((id) => (this.soloRun.id = id));
+  }
+
+  /** The local player's class (§4.11). */
+  get myClass(): ClassId {
+    const i = this.conn.state.players.get(this.conn.selfId)?.cls ?? 0;
+    return CLASS_IDS[i] ?? 'drifter';
+  }
+
+  /** Solo bonds: claimed once, at the end or when leaving (§4.12). */
+  private claimSolo(final: boolean): void {
+    const run = this.soloRun;
+    if (run.claimed || !run.id || this.conn.kind !== 'solo') return;
+    run.claimed = true;
+    const st = this.conn.state;
+    const r = hud.result;
+    const me = st.players.get(this.conn.selfId);
+    const award = {
+      km: r ? r.km : Math.min(WORLD.routeKm, this.trainClock.s / WORLD.metersPerKm),
+      won: final && !!r?.won,
+      landmarks: r?.landmarks ?? 0,
+      bondItems: me?.inv ? me.inv.pack.toArray().filter((k) => k === 'bond').length : 0,
+    };
+    const stats = { kills: r?.kills ?? 0, bounties: r?.bounties ?? 0, minutes: r?.minutes ?? 0 };
+    void account.soloFinish(run.id, award, stats, st.dev || !!r?.dev).then((b) => {
+      if (b !== null) {
+        hud.bondsEarned = b;
+        hud.bondsTotal = account.profile?.bonds ?? -1;
+      }
+    });
   }
 
   dispose(): void {
+    this.claimSolo(false);
+    this.markers.dispose();
+    this.compass.dispose();
     this.running = false;
     this.renderer.setAnimationLoop(null);
     for (const d of this.disposers) d();
@@ -320,6 +403,11 @@ export class Game {
   applySettings(): void {
     const s = this.settings;
     this.input.sensitivity = s.sensitivity;
+    this.input.setKeys(s.keys);
+    if (this.markers) {
+      this.markers.colorblind = s.colorblindMarkers;
+      this.compass.colorblind = s.colorblindMarkers;
+    }
     this.input.invertY = s.invertY;
     this.effects.gore = s.gore;
     this.audio?.setVolumes(s.masterVolume, s.effectsVolume);
@@ -658,6 +746,153 @@ export class Game {
       }
       case 'runEnd':
         break;
+      case 'ping': {
+        this.pings.onEvent(ev);
+        this.audio?.ping();
+        const who = ev.by === self ? 'You' : this.nameOf(ev.by);
+        if (this.settings.subtitles) subtitle(`[Ping] ${who}: ${PINGS[ev.kind] ?? ''}`, 3500);
+        break;
+      }
+    }
+    if (this.settings.subtitles) this.subtitleFor(ev);
+  }
+
+  /** World markers, the compass strip and the Prospector's lantern (§4.11, §4.14, §4.15). */
+  private updateOverlay(now: number): void {
+    const cam = this.camera;
+    const c = this.rig.worldPos;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    const v = new THREE.Vector3();
+    const project = (x: number, y: number, z: number): { x: number; y: number } | null => {
+      v.set(x - this.originX, y, z - this.originZ).project(cam);
+      if (v.z > 1 || v.z < -1) return null;
+      return { x: (v.x * 0.5 + 0.5) * w, y: (-v.y * 0.5 + 0.5) * h };
+    };
+    const playing = hud.ready && !hud.result;
+    this.markers.begin();
+    const marks: CompassMark[] = [];
+    const bearing = (x: number, z: number) => Math.atan2(-(x - c.x), -(z - c.z));
+    if (playing) {
+      // Pings.
+      for (const p of this.pings.active) {
+        let { x, y, z } = p;
+        if (p.target) {
+          const e = this.enemyView.position(p.target);
+          if (e) {
+            x = e.x;
+            y = e.y + 2.2;
+            z = e.z;
+          }
+        }
+        const s = project(x, y + 0.6, z);
+        const who = p.by === this.conn.selfId ? 'You' : this.nameOf(p.by);
+        if (s)
+          this.markers.add({
+            ...s,
+            icon: PING_ICONS[p.kind] ?? '◆',
+            label: `${PINGS[p.kind] ?? ''} · ${who}`,
+            cls: `ping ping-${p.kind}`,
+            dist: Math.hypot(x - c.x, y - c.y, z - c.z),
+          });
+        marks.push({ bearing: bearing(x, z), icon: PING_ICONS[p.kind] ?? '◆', cls: `ping-${p.kind}`, title: PINGS[p.kind] ?? '' });
+      }
+      // Downed teammates.
+      this.conn.state.players.forEach((pl, id) => {
+        if (id === this.conn.selfId || pl.life !== Life.Downed) return;
+        const pos = this.remotes.worldPosition(id);
+        const s = pos && project(pos.x, pos.y + 1.2, pos.z);
+        if (s && pos)
+          this.markers.add({ ...s, icon: '✚', label: `${pl.name} is down`, cls: 'downed', dist: Math.hypot(pos.x - c.x, pos.z - c.z) });
+      });
+      // Prospectors spot valuables nearby.
+      if (this.myClass === 'prospector') {
+        let n = 0;
+        this.itemView.forEach((id, kind, x, y, z) => {
+          if (n >= 12) return;
+          const def = ITEMS[kind];
+          if (!def || (def.cls !== 'valuable' && !(isBulky(kind) && def.value >= 20)) || kind === 'cash') return;
+          if (this.conn.state.items.get(id)?.holder) return;
+          const d = Math.hypot(x - c.x, y - c.y, z - c.z);
+          if (d > PERKS.prospectorSpot) return;
+          const s = project(x, y + 0.5, z);
+          if (!s) return;
+          n++;
+          this.markers.add({ ...s, icon: '$', label: def.name, cls: 'valuable', dist: d });
+        });
+      }
+      // Compass: the train, stations, junctions, landmarks and forts ahead.
+      const m = this.local.motor;
+      if (m.frame !== Frame.Train) {
+        const loco = this.trainView.locoPose;
+        marks.push({ bearing: bearing(loco.cx, loco.cz), icon: '🚂', cls: 'train', title: 'The train' });
+      }
+      const s0 = this.trainClock.s;
+      let nextStation = false;
+      for (const f of this.compassFeatures) {
+        const ahead = f.s - s0;
+        if (f.kind === 'station') {
+          if (nextStation || ahead < -200 || ahead > 6000) continue;
+          nextStation = true;
+          marks.push({ bearing: bearing(f.x, f.z), icon: '⌂', cls: 'station', title: f.name });
+        } else if (f.kind === 'junction' && ahead > -1000 && ahead < 4000)
+          marks.push({ bearing: bearing(f.x, f.z), icon: '⑂', cls: 'junction', title: f.name });
+        else if (f.kind === 'landmark' && ahead > -1500 && ahead < 5000)
+          marks.push({ bearing: bearing(f.x, f.z), icon: '◆', cls: 'landmark', title: f.name });
+        else if (f.kind === 'fort' && ahead > -500 && ahead < 5000)
+          marks.push({ bearing: bearing(f.x, f.z), icon: '⛫', cls: 'fort', title: f.name });
+      }
+    }
+    this.markers.end();
+    const dir = cam.getWorldDirection(v);
+    this.compass.visible = playing;
+    if (playing) this.compass.update(Math.atan2(-dir.x, -dir.z), marks);
+
+    // The lantern glows around a Prospector at night.
+    const night = this.sky.night;
+    const eye = this.eyeWorld();
+    this.lantern.position.set(eye.x - this.originX + 0.3, eye.y - 0.3, eye.z - this.originZ);
+    this.lantern.intensity = this.myClass === 'prospector' && night > 0.2 ? 14 * night : 0;
+    void now;
+  }
+
+  /** Important sounds as text (§4.15 subtitles). */
+  private subtitleFor(ev: GameEvent): void {
+    const near = (x: number, z: number, r: number) => {
+      const c = this.rig.worldPos;
+      return Math.hypot(x - c.x, z - c.z) < r;
+    };
+    switch (ev.e) {
+      case 'whistle':
+        subtitle('[Train whistle]');
+        break;
+      case 'shot':
+        if (ev.by !== this.conn.selfId && near(ev.ox, ev.oz, 80) && performance.now() - this.lastShotSub > 4000) {
+          this.lastShotSub = performance.now();
+          subtitle(ev.by.startsWith('e') ? '[Rifle fire nearby]' : '[Gunfire nearby]');
+        }
+        break;
+      case 'explode':
+        if (near(ev.x, ev.z, 150)) subtitle(ev.holy ? '[Holy water hisses]' : '[Explosion]');
+        break;
+      case 'growl':
+        subtitle(isBoss(ENEMY_TYPES[ev.type] ?? 'walker') ? '[A monstrous roar]' : '[A howl nearby]');
+        break;
+      case 'lightning':
+        subtitle('[Thunder]');
+        break;
+      case 'blink':
+        if (near(ev.x, ev.z, 40)) subtitle('[Something rushes past]');
+        break;
+      case 'zap':
+        subtitle('[Electric crackle]');
+        break;
+      case 'boss':
+        if (ev.awake) subtitle('[A boss awakens]', 3500);
+        break;
+      case 'downed':
+        subtitle('[Someone is down]');
+        break;
     }
   }
 
@@ -820,6 +1055,13 @@ export class Game {
 
     // Look (every frame, for responsiveness).
     const look = this.input.consumeLook();
+    const pingHeld = (this.input.held('ping') || this.touchPing) && !this.shopOpen;
+    if (this.pings.update(pingHeld, look.dx / 0.0022, look.dy / 0.0022)) {
+      // The ping wheel has the mouse.
+      look.dx = 0;
+      look.dy = 0;
+    }
+    hud.pingWheel = { open: this.pings.open, sel: this.pings.sel };
     const zoom = 1 - this.weapons.aimT * 0.3;
     this.lookYaw -= look.dx * zoom;
     this.lookPitch = Math.max(
@@ -1000,6 +1242,8 @@ export class Game {
 
     this.updateAudio(m.frame === Frame.Train, trainS);
 
+    this.updateOverlay(now);
+
     // Weather, sky, lights, shadows.
     const rs = this.conn.state;
     this.weatherFx.update(
@@ -1082,7 +1326,7 @@ export class Game {
     }
     const wheel = this.input.consumeWheel();
     if (wheel !== 0 && inv) this.cycleWeapon(wheel);
-    if (keys.has('KeyQ')) this.conn.send('cmd', { t: 'heal' });
+    if (keys.has(this.input.codeFor('heal'))) this.conn.send('cmd', { t: 'heal' });
     const before = this.local.motor.frame;
     const input = this.local.tick({
       mx: axes.mx,
@@ -1241,6 +1485,8 @@ export class Game {
     hud.bleed = me?.bleed ?? 0;
     hud.revive = me?.revive ?? 0;
     hud.over = this.conn.state.players.size > 0 && this.isOver();
+    hud.className = CLASSES[this.myClass].name;
+    hud.subs = hud.subs.filter((x) => x.until > performance.now());
     this.updateRunHud();
     hud.enemies = this.enemyView.count;
     if (hud.life === Life.Dead) {
@@ -1293,6 +1539,21 @@ export class Game {
         hud.result = JSON.parse(st.result) as typeof hud.result;
         // Free the mouse for the results screen.
         if (document.pointerLockElement) document.exitPointerLock();
+        if (this.conn.kind === 'solo') this.claimSolo(true);
+        else {
+          // The server paid out; show the estimate and refresh the total.
+          const me = st.players.get(this.conn.selfId);
+          const r = hud.result!;
+          hud.bondsEarned = r.dev
+            ? 0
+            : bondsFor({
+                km: r.km,
+                won: r.won,
+                landmarks: r.landmarks,
+                bondItems: me?.inv ? me.inv.pack.toArray().filter((k) => k === 'bond').length : 0,
+              });
+          setTimeout(() => void account.refresh().then(() => (hud.bondsTotal = account.profile?.bonds ?? -1)), 1500);
+        }
       } catch {
         hud.result = null;
       }

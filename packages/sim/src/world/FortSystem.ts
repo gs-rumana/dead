@@ -23,6 +23,8 @@ export interface RunResult {
   landmarks: number;
   bounties: number;
   kills: number;
+  /** The dev panel was used (no bonds, §12). */
+  dev: boolean;
 }
 
 /**
@@ -139,6 +141,7 @@ export class FortSystem {
       landmarks: this.landmarks,
       bounties: this.bounties,
       kills: this.kills,
+      dev: sim.devUsed,
     };
     sim.events.push({ ev: { e: 'runEnd', won } });
   }

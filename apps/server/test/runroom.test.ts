@@ -2,12 +2,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Client } from '@colyseus/sdk';
 import { PROTOCOL_VERSION, RUN_ROOM, RunState } from '@dead-tracks/shared';
 import { createGameServer } from '../src/app.ts';
+import { Tokens } from '../src/accounts/tokens.ts';
 
 const PORT = 25670 + Math.floor(Math.random() * 100);
 let server: ReturnType<typeof createGameServer>;
 
 beforeAll(async () => {
-  server = createGameServer();
+  server = createGameServer({ dbPath: ':memory:', tokens: new Tokens('t'.repeat(40)) });
   await server.listen(PORT);
 });
 

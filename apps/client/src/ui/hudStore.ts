@@ -63,6 +63,15 @@ export const hud = {
   boss: '',
   bossHp: 0,
   objective: '',
+  /** Ping wheel (§4.14). */
+  pingWheel: { open: false, sel: -1 },
+  /** Subtitles for important sounds (§4.15). */
+  subs: [] as Array<{ id: number; text: string; until: number }>,
+  /** Your class name (§4.11). */
+  className: '',
+  /** Bonds this run earned (shown on the results screen). */
+  bondsEarned: -1,
+  bondsTotal: -1,
   result: null as null | {
     won: boolean;
     km: number;
@@ -70,6 +79,7 @@ export const hud = {
     landmarks: number;
     bounties: number;
     kills: number;
+    dev?: boolean;
   },
 };
 
@@ -77,4 +87,18 @@ let toastId = 0;
 export function toast(text: string, ms = 3000): void {
   hud.toasts.push({ id: ++toastId, text, until: performance.now() + ms });
   if (hud.toasts.length > 4) hud.toasts.shift();
+}
+
+let subId = 0;
+/** A subtitle line for an important sound (only shown if the setting is on). */
+export function subtitle(text: string, ms = 2500): void {
+  const now = performance.now();
+  // Don't stack the same cue.
+  const same = hud.subs.find((x) => x.text === text);
+  if (same) {
+    same.until = now + ms;
+    return;
+  }
+  hud.subs.push({ id: ++subId, text, until: now + ms });
+  if (hud.subs.length > 3) hud.subs.shift();
 }

@@ -1,6 +1,14 @@
 import { useEffect, useState } from 'preact/hooks';
+import { type ClassId, PROTOCOL_VERSION } from '@dead-tracks/shared';
 import type { Game } from '../core/Game.ts';
 import { config } from '../core/config.ts';
+import { loadSettings, saveSettings } from '../core/settings.ts';
+import { account } from '../net/account.ts';
+import { LobbyConnection } from '../net/LobbyConnection.ts';
+import { gameServer, loadRegions } from '../net/regions.ts';
+import { LobbyScreen } from './Lobby.tsx';
+import { AgeGate, ClassPicker, ProfileCard, ageConfirmed } from './MainMenu.tsx';
+import { SettingsPanel } from './Settings.tsx';
 import { isTouchDevice } from '../core/quality.ts';
 import { Hud } from './Hud.tsx';
 import { DevPanel, PauseMenu, useMenuKeys } from './Menus.tsx';
@@ -9,25 +17,52 @@ import { hud } from './hudStore.ts';
 import { PerfHud } from './PerfHud.tsx';
 import { TouchControls } from './TouchControls.tsx';
 
-export type StartMode = { mode: 'solo' } | { mode: 'host' } | { mode: 'join'; code: string };
+export type StartMode =
+  | { mode: 'solo' }
+  /** Straight into a new run room (tests and bots; players use the lobby). */
+  | { mode: 'host' }
+  | { mode: 'join'; code: string; region?: string }
+  | { mode: 'run'; runId: string; region?: string };
 
 interface Props {
-  onStart: (mode: StartMode) => Promise<Game>;
+  onStart: (mode: StartMode, cls: ClassId) => Promise<Game>;
 }
 
 export function App({ onStart }: Props) {
   const [game, setGame] = useState<Game | null>(null);
+  const [lobby, setLobby] = useState<LobbyConnection | null>(null);
+  const [gate, setGate] = useState(!ageConfirmed() && !config.autostart);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [code, setCode] = useState(config.code);
   const [paused, setPaused] = useState(false);
   const [devOpen, setDevOpen] = useState(config.dev);
   const [bagOpen, setBagOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [menuSettings] = useState(() => loadSettings());
+  const [cls, setClsState] = useState<ClassId>(() => menuSettings.cls);
   const [, rerender] = useState(0);
+  const setCls = (c: ClassId) => {
+    setClsState(c);
+    menuSettings.cls = c;
+    saveSettings(menuSettings);
+  };
+  useEffect(() => {
+    void account.init();
+    void loadRegions();
+  }, []);
+  // Only classes the account owns can be picked.
+  useEffect(
+    () =>
+      account.on(() => {
+        if (account.profile && !account.classes.includes(cls)) setCls('drifter');
+      }),
+    [cls],
+  );
   useEffect(() => {
     const id = setInterval(() => rerender((x) => x + 1), 150);
     const onKey = (e: KeyboardEvent) => {
-      if (e.code === 'Tab' && game) {
+      if (game && e.code === game.settings.keys.bag) {
         e.preventDefault();
         setBagOpen((b) => {
           if (!b && document.pointerLockElement) document.exitPointerLock();
@@ -54,23 +89,92 @@ export function App({ onStart }: Props) {
     () => setDevOpen((d) => !d),
   );
 
+  const fail = (e: unknown) => {
+    const msg = e instanceof Error ? e.message : String(e);
+    // §9: an outdated cached client is told to reload before joining.
+    if (/protocol mismatch/i.test(msg))
+      setError('A new version of the game is out. Reload the page to update.');
+    else if (/not found|disposed|locked|full/i.test(msg))
+      setError('That party is full, finished, or the code is wrong.');
+    else setError(msg);
+  };
+
   const start = async (mode: StartMode) => {
     setBusy(true);
     setError('');
     try {
-      setGame(await onStart(mode));
+      setGame(await onStart(mode, cls));
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      // §9: an outdated cached client is told to reload before joining.
-      if (/protocol mismatch/i.test(msg))
-        setError('A new version of the game is out. Reload the page to update.');
-      else if (/not found|disposed|locked|full/i.test(msg))
-        setError('That party is full, finished, or the code is wrong.');
-      else setError(msg);
+      fail(e);
     } finally {
       setBusy(false);
     }
   };
+
+  const joinOpts = () => ({
+    protocol: PROTOCOL_VERSION,
+    cls,
+    ...(account.sessionToken ? { token: account.sessionToken } : {}),
+    ...(config.name ? { name: config.name } : {}),
+  });
+
+  /** Watches a lobby: when the leader starts, everyone goes to the run. */
+  const enterLobby = (l: LobbyConnection, region?: string) => {
+    setLobby(l);
+    const go = () => {
+      if (!l.state.runId) return;
+      off();
+      l.leave();
+      setLobby(null);
+      void start({ mode: 'run', runId: l.state.runId, ...(region ? { region } : {}) });
+    };
+    const off = l.onChange(go);
+    l.onClose(() => setLobby((cur) => (cur === l ? null : cur)));
+    go();
+  };
+
+  const host = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await Promise.all([account.init(), loadRegions()]);
+      enterLobby(await LobbyConnection.create(gameServer(), joinOpts(), config.seed));
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const join = async (c: string) => {
+    setBusy(true);
+    setError('');
+    try {
+      await Promise.all([account.init(), loadRegions()]);
+      // The party lives in its creator's region (§9.2).
+      const info = await account.party(c);
+      const region = info?.region;
+      if (info?.room === 'lobby')
+        enterLobby(await LobbyConnection.join(gameServer(region), c, joinOpts()), region);
+      else {
+        setBusy(false);
+        await start({ mode: 'join', code: c, ...(region ? { region } : {}) });
+      }
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Automated starts (tests, invite links with ?autostart).
+  useEffect(() => {
+    if (!config.autostart) return;
+    if (config.autostart === 'solo') void start({ mode: 'solo' });
+    else if (config.autostart === 'host') void start({ mode: 'host' });
+    else if (config.autostart === 'lobby') void host();
+    else if (config.autostart === 'join' && config.code) void join(config.code);
+  }, []);
 
   if (game) {
     const leave = () => {
@@ -105,6 +209,7 @@ export function App({ onStart }: Props) {
             input={game.input}
             onSwap={() => game.cycleWeapon(1)}
             onHeal={() => game.heal()}
+            onPing={(down) => (game.touchPing = down)}
           />
         )}
         {config.perfHud && <PerfHud conn={game.conn} />}
@@ -117,38 +222,73 @@ export function App({ onStart }: Props) {
     );
   }
 
+  if (gate) return <AgeGate onOk={() => setGate(false)} />;
+
+  if (lobby)
+    return (
+      <LobbyScreen
+        lobby={lobby}
+        cls={cls}
+        onClass={setCls}
+        onLeave={() => {
+          lobby.leave();
+          setLobby(null);
+        }}
+      />
+    );
+
   return (
-    <div class="menu" data-testid="menu">
+    <div class="menu main" data-testid="menu">
       <h1>Dead Tracks</h1>
       <p class="tagline">80 km of track. Not enough daylight.</p>
-      <button disabled={busy} data-testid="play-solo" onClick={() => start({ mode: 'solo' })}>
-        {busy ? 'Loading…' : 'Play solo'}
-      </button>
-      <button disabled={busy} data-testid="host" onClick={() => start({ mode: 'host' })}>
-        Host a party
-      </button>
-      <form
-        class="join"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (code.length === 4) void start({ mode: 'join', code });
-        }}
-      >
-        <input
-          data-testid="code-input"
-          value={code}
-          maxLength={4}
-          placeholder="CODE"
-          onInput={(e) => setCode((e.target as HTMLInputElement).value.toUpperCase())}
-        />
-        <button disabled={busy || code.length !== 4} type="submit" data-testid="join">
-          Join
-        </button>
-      </form>
-      {error && (
-        <p class="error" data-testid="error">
-          {error}
-        </p>
+      <div class="menu-body">
+        <div class="menu-col">
+          <ProfileCard />
+          <ClassPicker value={cls} onChange={setCls} />
+        </div>
+        <div class="menu-col actions">
+          <button disabled={busy} data-testid="play-solo" onClick={() => start({ mode: 'solo' })}>
+            {busy ? 'Loading…' : 'Play solo'}
+          </button>
+          <button disabled={busy} data-testid="host" onClick={() => void host()}>
+            Host a party
+          </button>
+          <form
+            class="join"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (code.length === 4) void join(code);
+            }}
+          >
+            <input
+              data-testid="code-input"
+              value={code}
+              maxLength={4}
+              placeholder="CODE"
+              onInput={(e) => setCode((e.target as HTMLInputElement).value.toUpperCase())}
+            />
+            <button disabled={busy || code.length !== 4} type="submit" data-testid="join">
+              Join
+            </button>
+          </form>
+          <button class="secondary" data-testid="menu-settings" onClick={() => setSettingsOpen(true)}>
+            Settings
+          </button>
+          {error && (
+            <p class="error" data-testid="error">
+              {error}
+            </p>
+          )}
+        </div>
+      </div>
+      {settingsOpen && (
+        <div class="overlay interactive" onClick={(e) => e.target === e.currentTarget && setSettingsOpen(false)}>
+          <div class="panel wide">
+            <h2>Settings</h2>
+            <SettingsPanel settings={menuSettings} onChange={() => {}} />
+            <button onClick={() => setSettingsOpen(false)}>Done</button>
+          </div>
+        </div>
       )}
     </div>
   );
