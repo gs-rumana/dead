@@ -1,0 +1,147 @@
+:root {
+  --ink: #f1e6d2;
+  --ink-dim: #b9a98f;
+  --paper: #16110d;
+  --accent: #d9a441;
+  --danger: #c4573d;
+  color-scheme: dark;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--paper);
+  color: var(--ink);
+  overscroll-behavior: none;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#game {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+#ui {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+#ui button,
+#ui input,
+#ui .interactive {
+  pointer-events: auto;
+}
+
+button {
+  font: inherit;
+  color: var(--paper);
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  padding: 0.7em 1.4em;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.menu {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.8rem;
+  background: radial-gradient(ellipse at 50% 35%, #3b2a1d 0%, #16110d 70%);
+  pointer-events: auto;
+}
+
+.menu h1 {
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: clamp(2.6rem, 9vw, 5rem);
+  letter-spacing: 0.06em;
+  margin: 0;
+  color: var(--accent);
+  text-transform: uppercase;
+}
+
+.menu .tagline {
+  color: var(--ink-dim);
+  margin: 0 0 1.2rem;
+}
+
+.menu .join {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.menu input {
+  font: inherit;
+  width: 6.5em;
+  text-align: center;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  background: #0d0a08;
+  color: var(--ink);
+  border: 1px solid #4a3b2c;
+  border-radius: 6px;
+  padding: 0.6em;
+}
+
+.error {
+  color: var(--danger);
+}
+
+.perf-hud {
+  position: absolute;
+  top: max(6px, env(safe-area-inset-top));
+  left: max(6px, env(safe-area-inset-left));
+  font:
+    11px/1.35 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  background: rgba(0, 0, 0, 0.55);
+  color: #d6f5c9;
+  padding: 4px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.party-code {
+  position: absolute;
+  top: max(8px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-shadow: 0 1px 2px #000;
+}
+
+.nudge {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+}

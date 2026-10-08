@@ -1,0 +1,19 @@
+{
+  "name": "@dead-tracks/sim",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./host": "./src/host/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@colyseus/schema": "^5.0.36",
+    "@dead-tracks/shared": "workspace:*",
+    "@dimforge/rapier3d-compat": "^0.21.0"
+  }
+}

@@ -1,0 +1,21 @@
+export const PLAYER = {
+  radius: 0.32,
+  /** Capsule half-height of the cylinder part; total height = 2 * (halfHeight + radius). */
+  halfHeight: 0.58,
+  eyeHeight: 1.62,
+  walkSpeed: 4.6,
+  sprintSpeed: 7.2,
+  aimSpeed: 2.6,
+  groundAccel: 60,
+  airAccel: 10,
+  jumpSpeed: 6.2,
+  gravity: 20,
+  maxFallSpeed: 50,
+  stepHeight: 0.45,
+  maxSlopeDeg: 50,
+  maxHp: 100,
+  maxStamina: 100,
+  sprintStaminaPerSec: 12,
+  staminaRegenPerSec: 18,
+  jumpStamina: 6,
+} as const;

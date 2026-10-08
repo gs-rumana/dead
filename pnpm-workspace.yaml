@@ -1,0 +1,13 @@
+packages:
+  - apps/*
+  - packages/*
+  - tools/*
+
+allowBuilds:
+  esbuild: true
+  msgpackr-extract: false
+
+minimumReleaseAgeExclude:
+  - '@playwright/test@1.64.0'
+  - playwright-core@1.64.0
+  - playwright@1.64.0
