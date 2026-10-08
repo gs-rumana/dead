@@ -5,6 +5,7 @@ import {
   BONES,
   BONE_PART,
   type BoneName,
+  HAND_GRIP,
   type Outfit,
   buildHumanoidGeometry,
   createSkeleton,
@@ -44,7 +45,7 @@ const CLIP_SPEC: Array<[ClipName, number, number, boolean]> = [
 
 type Bones = Record<BoneName, THREE.Bone>;
 
-/** Procedural undead poses: t in [0, 1) through the clip. */
+/** Procedural undead poses: t in [0, 1) through the clip (signs as in humanoid.ts). */
 function poseZombie(b: Bones, clip: ClipName, t: number): void {
   for (const n of BONES) b[n].rotation.set(0, 0, 0);
   b.hips.position.set(0, 0.95, 0);
@@ -52,97 +53,97 @@ function poseZombie(b: Bones, clip: ClipName, t: number): void {
   const c = Math.cos(t * Math.PI * 2);
   // Arms reach forward, head lolls: the classic shamble.
   const reach = (amt: number) => {
-    b.upperArmL.rotation.x = -1.35 * amt + s * 0.12;
-    b.upperArmR.rotation.x = -1.2 * amt - s * 0.12;
-    b.lowerArmL.rotation.x = -0.25 * amt;
-    b.lowerArmR.rotation.x = -0.35 * amt;
+    b.upperArmL.rotation.x = 1.35 * amt - s * 0.12;
+    b.upperArmR.rotation.x = 1.2 * amt + s * 0.12;
+    b.lowerArmL.rotation.x = 0.25 * amt;
+    b.lowerArmR.rotation.x = 0.35 * amt;
   };
   switch (clip) {
     case 'idle':
       reach(0.35);
-      b.spine.rotation.x = 0.15 + s * 0.03;
+      b.spine.rotation.x = -0.15 - s * 0.03;
       b.head.rotation.z = 0.25 + s * 0.08;
-      b.head.rotation.x = 0.2;
+      b.head.rotation.x = -0.2;
       break;
     case 'walk': {
       reach(0.85);
-      b.upperLegL.rotation.x = s * 0.42;
-      b.upperLegR.rotation.x = -s * 0.32;
-      b.lowerLegL.rotation.x = Math.max(0, -c) * 0.7 + 0.05;
-      b.lowerLegR.rotation.x = Math.max(0, c) * 0.4 + 0.05;
-      b.footR.rotation.x = 0.35; // dragging foot
+      b.upperLegL.rotation.x = -s * 0.42;
+      b.upperLegR.rotation.x = s * 0.32;
+      b.lowerLegL.rotation.x = -Math.max(0, -c) * 0.7 - 0.05;
+      b.lowerLegR.rotation.x = -Math.max(0, c) * 0.4 - 0.05;
+      b.footR.rotation.x = -0.35; // dragging foot
       b.hips.position.y = 0.95 - Math.abs(c) * 0.05;
       b.hips.rotation.z = s * 0.06;
-      b.spine.rotation.x = 0.28;
-      b.spine.rotation.y = s * 0.12;
+      b.spine.rotation.x = -0.28;
+      b.spine.rotation.y = -s * 0.12;
       b.head.rotation.z = 0.3 + s * 0.1;
-      b.head.rotation.x = 0.15;
+      b.head.rotation.x = -0.15;
       break;
     }
     case 'run': {
-      b.upperArmL.rotation.x = -0.9 + s * 0.9;
-      b.upperArmR.rotation.x = -0.9 - s * 0.9;
-      b.lowerArmL.rotation.x = -0.6;
-      b.lowerArmR.rotation.x = -0.6;
-      b.upperLegL.rotation.x = s * 0.85;
-      b.upperLegR.rotation.x = -s * 0.85;
-      b.lowerLegL.rotation.x = Math.max(0, -c) * 1.4 + 0.1;
-      b.lowerLegR.rotation.x = Math.max(0, c) * 1.4 + 0.1;
+      b.upperArmL.rotation.x = 0.9 - s * 0.9;
+      b.upperArmR.rotation.x = 0.9 + s * 0.9;
+      b.lowerArmL.rotation.x = 0.6;
+      b.lowerArmR.rotation.x = 0.6;
+      b.upperLegL.rotation.x = -s * 0.85;
+      b.upperLegR.rotation.x = s * 0.85;
+      b.lowerLegL.rotation.x = -Math.max(0, -c) * 1.4 - 0.1;
+      b.lowerLegR.rotation.x = -Math.max(0, c) * 1.4 - 0.1;
       b.hips.position.y = 0.92 - Math.abs(c) * 0.08;
-      b.spine.rotation.x = 0.5;
-      b.head.rotation.x = -0.25;
+      b.spine.rotation.x = -0.5;
+      b.head.rotation.x = 0.25;
       b.head.rotation.z = s * 0.15;
       break;
     }
     case 'attack': {
       // Raise both arms, then claw down and forward.
       const up = t < 0.4 ? t / 0.4 : 1 - (t - 0.4) / 0.6;
-      b.upperArmL.rotation.x = -1.2 - up * 1.4 + (t > 0.4 ? (t - 0.4) * 1.2 : 0);
-      b.upperArmR.rotation.x = -1.1 - up * 1.5 + (t > 0.4 ? (t - 0.4) * 1.3 : 0);
-      b.lowerArmL.rotation.x = -0.4 * up;
-      b.lowerArmR.rotation.x = -0.4 * up;
-      b.spine.rotation.x = 0.2 + (t > 0.4 ? (t - 0.4) * 0.8 : -0.1 * up);
-      b.head.rotation.x = -0.2;
-      b.upperLegL.rotation.x = -0.3;
-      b.upperLegR.rotation.x = 0.25;
+      b.upperArmL.rotation.x = 1.2 + up * 1.4 - (t > 0.4 ? (t - 0.4) * 1.2 : 0);
+      b.upperArmR.rotation.x = 1.1 + up * 1.5 - (t > 0.4 ? (t - 0.4) * 1.3 : 0);
+      b.lowerArmL.rotation.x = 0.4 * up;
+      b.lowerArmR.rotation.x = 0.4 * up;
+      b.spine.rotation.x = -0.2 - (t > 0.4 ? (t - 0.4) * 0.8 : -0.1 * up);
+      b.head.rotation.x = 0.2;
+      b.upperLegL.rotation.x = 0.3;
+      b.upperLegR.rotation.x = -0.25;
       break;
     }
     case 'dead': {
-      // Topple backward and settle on the ground.
+      // Topple backward over the heels and settle on the ground.
       const k = Math.min(1, t * 1.6);
       const ease = k * k * (3 - 2 * k);
-      b.hips.rotation.x = -ease * 1.5;
+      b.hips.rotation.x = ease * 1.5;
       b.hips.position.y = 0.95 - ease * 0.72;
-      b.hips.position.z = ease * 0.5;
-      b.lowerLegL.rotation.x = 0.4 * (1 - ease) + 0.2;
-      b.lowerLegR.rotation.x = 0.6 * (1 - ease);
+      b.hips.position.z = ease * 0.3;
+      b.lowerLegL.rotation.x = -0.4 * (1 - ease) - 0.2;
+      b.lowerLegR.rotation.x = -0.6 * (1 - ease);
       b.upperArmL.rotation.z = -ease * 1.2;
       b.upperArmR.rotation.z = ease * 1.0;
-      b.upperArmR.rotation.x = -ease * 0.4;
-      b.head.rotation.y = ease * 0.6;
-      b.head.rotation.x = -ease * 0.3;
+      b.upperArmR.rotation.x = ease * 0.4;
+      b.head.rotation.y = -ease * 0.6;
+      b.head.rotation.x = ease * 0.3;
       break;
     }
     case 'climb':
-      b.upperArmL.rotation.x = -2.6 + s * 0.3;
-      b.upperArmR.rotation.x = -2.6 - s * 0.3;
-      b.lowerArmL.rotation.x = -0.5;
-      b.lowerArmR.rotation.x = -0.5;
-      b.upperLegL.rotation.x = -0.8 + s * 0.6;
-      b.upperLegR.rotation.x = -0.8 - s * 0.6;
-      b.lowerLegL.rotation.x = 1.2;
-      b.lowerLegR.rotation.x = 1.2;
-      b.spine.rotation.x = 0.3;
+      b.upperArmL.rotation.x = 2.6 - s * 0.3;
+      b.upperArmR.rotation.x = 2.6 + s * 0.3;
+      b.lowerArmL.rotation.x = 0.5;
+      b.lowerArmR.rotation.x = 0.5;
+      b.upperLegL.rotation.x = 0.8 - s * 0.6;
+      b.upperLegR.rotation.x = 0.8 + s * 0.6;
+      b.lowerLegL.rotation.x = -1.2;
+      b.lowerLegR.rotation.x = -1.2;
+      b.spine.rotation.x = -0.3;
       break;
     case 'crouch':
       reach(0.4);
       b.hips.position.y = 0.6 + s * 0.02;
-      b.upperLegL.rotation.x = -1.4;
-      b.upperLegR.rotation.x = -1.1;
-      b.lowerLegL.rotation.x = 2.2;
-      b.lowerLegR.rotation.x = 1.9;
-      b.spine.rotation.x = 0.6;
-      b.head.rotation.x = -0.4;
+      b.upperLegL.rotation.x = 1.4;
+      b.upperLegR.rotation.x = 1.1;
+      b.lowerLegL.rotation.x = -2.2;
+      b.lowerLegR.rotation.x = -1.9;
+      b.spine.rotation.x = -0.6;
+      b.head.rotation.x = 0.4;
       break;
   }
 }
@@ -155,71 +156,72 @@ function poseHuman(b: Bones, clip: ClipName, t: number): void {
   const c = Math.cos(t * Math.PI * 2);
   const carry = () => {
     // Rifle held across the body.
-    b.upperArmR.rotation.set(-0.5, 0, 0.15);
-    b.lowerArmR.rotation.set(-0.9, 0, 0);
-    b.upperArmL.rotation.set(-0.7, 0, -0.3);
-    b.lowerArmL.rotation.set(-1.1, 0, 0);
+    b.upperArmR.rotation.set(0.5, 0, 0.15);
+    b.lowerArmR.rotation.set(0.9, 0, 0);
+    b.upperArmL.rotation.set(0.7, 0, 0.3);
+    b.lowerArmL.rotation.set(1.1, 0, 0);
   };
   switch (clip) {
     case 'idle':
       carry();
-      b.chest.rotation.x = s * 0.02;
+      b.chest.rotation.x = -s * 0.02;
       break;
     case 'walk':
       carry();
-      b.upperLegL.rotation.x = s * 0.5;
-      b.upperLegR.rotation.x = -s * 0.5;
-      b.lowerLegL.rotation.x = Math.max(0, -c) * 0.8 + 0.05;
-      b.lowerLegR.rotation.x = Math.max(0, c) * 0.8 + 0.05;
+      b.upperLegL.rotation.x = -s * 0.5;
+      b.upperLegR.rotation.x = s * 0.5;
+      b.lowerLegL.rotation.x = -Math.max(0, -c) * 0.8 - 0.05;
+      b.lowerLegR.rotation.x = -Math.max(0, c) * 0.8 - 0.05;
       b.hips.position.y = 0.95 - Math.abs(c) * 0.03;
       break;
     case 'run':
       carry();
-      b.upperLegL.rotation.x = s * 0.8;
-      b.upperLegR.rotation.x = -s * 0.8;
-      b.lowerLegL.rotation.x = Math.max(0, -c) * 1.3 + 0.1;
-      b.lowerLegR.rotation.x = Math.max(0, c) * 1.3 + 0.1;
-      b.spine.rotation.x = 0.25;
+      b.upperLegL.rotation.x = -s * 0.8;
+      b.upperLegR.rotation.x = s * 0.8;
+      b.lowerLegL.rotation.x = -Math.max(0, -c) * 1.3 - 0.1;
+      b.lowerLegR.rotation.x = -Math.max(0, c) * 1.3 - 0.1;
+      b.spine.rotation.x = -0.25;
       b.hips.position.y = 0.92 - Math.abs(c) * 0.06;
       break;
     case 'attack': {
       // Shouldered rifle, a small recoil kick early in the clip.
       const kick = t < 0.2 ? (0.2 - t) * 1.2 : 0;
-      b.upperArmR.rotation.set(-1.45 - kick, 0, 0.25);
-      b.lowerArmR.rotation.set(-0.35, 0, 0);
-      b.upperArmL.rotation.set(-1.5 - kick, 0, -0.55);
-      b.lowerArmL.rotation.set(-0.15, 0, 0);
-      b.head.rotation.x = 0.1;
-      b.spine.rotation.y = -0.15;
+      b.upperArmR.rotation.set(1.45 + kick, 0, 0.25);
+      b.lowerArmR.rotation.set(0.35, 0, 0);
+      b.upperArmL.rotation.set(1.5 + kick, 0, 0.45);
+      b.lowerArmL.rotation.set(0.15, 0, 0);
+      b.head.rotation.x = -0.1;
+      b.spine.rotation.y = 0.15;
       break;
     }
     case 'dead': {
+      // Pitch forward onto the face.
       const k = Math.min(1, t * 1.6);
       const ease = k * k * (3 - 2 * k);
-      b.hips.rotation.x = ease * 1.45;
+      b.hips.rotation.x = -ease * 1.45;
       b.hips.position.y = 0.95 - ease * 0.74;
-      b.hips.position.z = -ease * 0.5;
+      b.hips.position.z = -ease * 0.3;
       b.upperArmL.rotation.z = -ease * 1.4;
       b.upperArmR.rotation.z = ease * 1.2;
-      b.lowerLegL.rotation.x = 0.5 * (1 - ease);
+      b.lowerLegL.rotation.x = -0.5 * (1 - ease);
       break;
     }
     case 'climb':
-      b.upperArmL.rotation.x = -2.6 + s * 0.3;
-      b.upperArmR.rotation.x = -2.6 - s * 0.3;
-      b.upperLegL.rotation.x = -0.8 + s * 0.6;
-      b.upperLegR.rotation.x = -0.8 - s * 0.6;
-      b.lowerLegL.rotation.x = 1.2;
-      b.lowerLegR.rotation.x = 1.2;
+      b.upperArmL.rotation.x = 2.6 - s * 0.3;
+      b.upperArmR.rotation.x = 2.6 + s * 0.3;
+      b.upperLegL.rotation.x = 0.8 - s * 0.6;
+      b.upperLegR.rotation.x = 0.8 + s * 0.6;
+      b.lowerLegL.rotation.x = -1.2;
+      b.lowerLegR.rotation.x = -1.2;
       break;
     case 'crouch':
       carry();
       b.hips.position.y = 0.6;
-      b.upperLegL.rotation.x = -1.4;
-      b.upperLegR.rotation.x = -1.1;
-      b.lowerLegL.rotation.x = 2.2;
-      b.lowerLegR.rotation.x = 1.9;
-      b.spine.rotation.x = 0.4;
+      b.upperLegL.rotation.x = 1.4;
+      b.upperLegR.rotation.x = 1.1;
+      b.lowerLegL.rotation.x = -2.2;
+      b.lowerLegR.rotation.x = -1.9;
+      b.spine.rotation.x = -0.4;
       break;
   }
 }
@@ -241,13 +243,8 @@ export function bakeVat(outfit: Outfit, style: VatStyle = 'zombie', held = ''): 
   if (model) {
     // Bind the weapon to the right hand in the bind pose (same mapping as Humanoid.setHeld).
     const g = model.geometry.clone();
-    const basis = new THREE.Matrix4().makeBasis(
-      new THREE.Vector3(-1, 0, 0),
-      new THREE.Vector3(0, 0, 1),
-      new THREE.Vector3(0, 1, 0),
-    );
-    g.applyMatrix4(basis);
-    g.translate(0.24, 0.92 - 0.07, 0.01);
+    g.applyMatrix4(HAND_GRIP);
+    g.translate(0.24, 0.92 - 0.07, -0.01);
     const n = g.getAttribute('position').count;
     const si = new Uint16Array(n * 4);
     const sw = new Float32Array(n * 4);

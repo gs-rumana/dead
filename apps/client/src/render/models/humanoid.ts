@@ -31,7 +31,11 @@ export const BONES = [
 ] as const;
 export type BoneName = (typeof BONES)[number];
 
-/** Bind-pose joint positions (absolute, metres; character faces -Z). */
+/**
+ * Bind-pose joint positions (absolute, metres; character faces -Z, its right is +X).
+ * Poses turn bones about X: positive swings a hanging limb forward and tips the
+ * torso back, so knees bend negative and elbows positive.
+ */
 const JOINTS: Record<BoneName, [number, number, number, BoneName | null]> = {
   hips: [0, 0.95, 0, null],
   spine: [0, 1.06, 0, 'hips'],
@@ -51,6 +55,16 @@ const JOINTS: Record<BoneName, [number, number, number, BoneName | null]> = {
   lowerLegR: [0.1, 0.5, 0, 'upperLegR'],
   footR: [0.1, 0.09, 0, 'lowerLegR'],
 };
+
+/**
+ * Weapon axes onto the right hand: barrel along the fingers (-Y), top of the gun
+ * to the front of the hand (-Z), so a raised arm holds it upright.
+ */
+export const HAND_GRIP = new THREE.Matrix4().makeBasis(
+  new THREE.Vector3(1, 0, 0),
+  new THREE.Vector3(0, 0, -1),
+  new THREE.Vector3(0, 1, 0),
+);
 
 export interface Outfit {
   skin: Swatch;
@@ -91,9 +105,27 @@ export const ZOMBIE_OUTFITS: Record<'walker' | 'runner' | 'brute', Outfit> = {
 };
 
 /** Night hunters and landmark bosses (§4.6). */
-export const MONSTER_OUTFITS: Record<'werewolf' | 'vampire' | 'rancher' | 'voss' | 'countess', Outfit> = {
-  werewolf: { skin: 'fur', shirt: 'fur', pants: 'dusterDark', boots: 'furDark', vest: 'furDark', beast: true },
-  vampire: { skin: 'pale', shirt: 'black', pants: 'black', boots: 'hatDark', vest: 'velvet', hair: 'black', cape: 'black' },
+export const MONSTER_OUTFITS: Record<
+  'werewolf' | 'vampire' | 'rancher' | 'voss' | 'countess',
+  Outfit
+> = {
+  werewolf: {
+    skin: 'fur',
+    shirt: 'fur',
+    pants: 'dusterDark',
+    boots: 'furDark',
+    vest: 'furDark',
+    beast: true,
+  },
+  vampire: {
+    skin: 'pale',
+    shirt: 'black',
+    pants: 'black',
+    boots: 'hatDark',
+    vest: 'velvet',
+    hair: 'black',
+    cape: 'black',
+  },
   rancher: {
     skin: 'rot1',
     shirt: 'shirtRed',
@@ -104,8 +136,25 @@ export const MONSTER_OUTFITS: Record<'werewolf' | 'vampire' | 'rancher' | 'voss'
     bandana: 'blood',
     coat: 'duster',
   },
-  voss: { skin: 'rot2', shirt: 'shirt', pants: 'dusterDark', boots: 'black', vest: 'labCoat', hair: 'white', coat: 'labCoat' },
-  countess: { skin: 'pale', shirt: 'velvet', pants: 'velvet', boots: 'black', vest: 'black', hair: 'black', cape: 'blood', coat: 'velvet' },
+  voss: {
+    skin: 'rot2',
+    shirt: 'shirt',
+    pants: 'dusterDark',
+    boots: 'black',
+    vest: 'labCoat',
+    hair: 'white',
+    coat: 'labCoat',
+  },
+  countess: {
+    skin: 'pale',
+    shirt: 'velvet',
+    pants: 'velvet',
+    boots: 'black',
+    vest: 'black',
+    hair: 'black',
+    cape: 'blood',
+    coat: 'velvet',
+  },
 };
 
 /** Outlaws (§4.6): dusters, bandanas and dark hats. */
@@ -205,7 +254,13 @@ function parts(o: Outfit): Part[] {
   // Head.
   P('head', o.skin, at(taper(0.17, 0.2, 0.19, 0.21, 0.23), 0, 1.69, 0.005));
   P('head', o.skin, at(new THREE.BoxGeometry(0.04, 0.06, 0.05), 0, 1.68, -0.115));
-  if (o.hair) P('head', o.hair, at(new THREE.BoxGeometry(0.2, 0.08, 0.2), 0, 1.79, 0.02));
+  for (const x of [-1, 1])
+    P('head', 'black', at(new THREE.BoxGeometry(0.035, 0.02, 0.01), x * 0.045, 1.715, -0.103));
+  if (o.hair) {
+    P('head', o.hair, at(new THREE.BoxGeometry(0.2, 0.08, 0.2), 0, 1.79, 0.02));
+    // Down the back of the head, so a figure seen from behind doesn't read as a face.
+    P('head', o.hair, at(new THREE.BoxGeometry(0.2, 0.16, 0.04), 0, 1.71, 0.1));
+  }
   if (o.beast) {
     P('head', o.skin, at(new THREE.BoxGeometry(0.1, 0.09, 0.16), 0, 1.65, -0.17));
     P('head', 'black', at(new THREE.BoxGeometry(0.05, 0.03, 0.03), 0, 1.68, -0.255));
@@ -375,14 +430,8 @@ export class Humanoid {
     const model = id ? weaponModel(id) : null;
     if (!model) return;
     const m = new THREE.Mesh(model.geometry, material);
-    // Gun axes onto the hand: barrel along the fingers (-Y), top of the gun forward (+Z).
-    const basis = new THREE.Matrix4().makeBasis(
-      new THREE.Vector3(-1, 0, 0),
-      new THREE.Vector3(0, 0, 1),
-      new THREE.Vector3(0, 1, 0),
-    );
-    m.quaternion.setFromRotationMatrix(basis);
-    m.position.set(0, -0.07, 0.01);
+    m.quaternion.setFromRotationMatrix(HAND_GRIP);
+    m.position.set(0, -0.07, -0.01);
     m.castShadow = true;
     this.heldMesh = m;
     this.bones.handR.add(m);
@@ -409,48 +458,50 @@ export class Humanoid {
     for (const name of BONES) b[name].rotation.set(0, 0, 0);
     b.hips.position.y = 0.95 - Math.abs(c) * 0.04 * g;
 
-    // Legs: thigh swing, knee bend on the back swing.
-    b.upperLegL.rotation.x = s * 0.55 * g;
-    b.upperLegR.rotation.x = -s * 0.55 * g;
-    b.lowerLegL.rotation.x = Math.max(0, -c) * 0.9 * g + 0.05;
-    b.lowerLegR.rotation.x = Math.max(0, c) * 0.9 * g + 0.05;
-    b.footL.rotation.x = -s * 0.2 * g;
-    b.footR.rotation.x = s * 0.2 * g;
+    // Legs: thigh swing, knees bend as each leg swings through.
+    b.upperLegL.rotation.x = -s * 0.55 * g;
+    b.upperLegR.rotation.x = s * 0.55 * g;
+    b.lowerLegL.rotation.x = -Math.max(0, -c) * 0.9 * g - 0.05;
+    b.lowerLegR.rotation.x = -Math.max(0, c) * 0.9 * g - 0.05;
+    b.footL.rotation.x = s * 0.2 * g;
+    b.footR.rotation.x = -s * 0.2 * g;
     // Arms counter-swing, slightly bent.
-    b.upperArmL.rotation.x = -s * 0.45 * g;
-    b.upperArmR.rotation.x = s * 0.45 * g;
+    b.upperArmL.rotation.x = s * 0.45 * g;
+    b.upperArmR.rotation.x = -s * 0.45 * g;
     b.upperArmL.rotation.z = -0.08;
     b.upperArmR.rotation.z = 0.08;
     b.lowerArmL.rotation.x = 0.15 + g * 0.35;
     b.lowerArmR.rotation.x = 0.15 + g * 0.35;
     // Torso lean and twist.
     b.spine.rotation.x = -0.05 * g - (p.sprinting ? 0.12 : 0);
-    b.spine.rotation.y = s * 0.08 * g;
+    b.spine.rotation.y = -s * 0.08 * g;
     b.chest.rotation.x = breath + p.pitch * 0.25;
     b.neck.rotation.x = p.pitch * 0.3;
     b.head.rotation.x = p.pitch * 0.35;
 
     if (this.air > 0.01) {
+      // Leading knee up, trailing leg tucked.
       const a = this.air;
-      b.upperLegL.rotation.x += 0.5 * a;
-      b.upperLegR.rotation.x += -0.1 * a;
-      b.lowerLegL.rotation.x += 0.7 * a;
-      b.lowerLegR.rotation.x += 0.3 * a;
+      b.upperLegL.rotation.x += 0.6 * a;
+      b.upperLegR.rotation.x -= 0.25 * a;
+      b.lowerLegL.rotation.x -= 0.9 * a;
+      b.lowerLegR.rotation.x -= 0.5 * a;
       b.upperArmL.rotation.z -= 0.5 * a;
       b.upperArmR.rotation.z += 0.5 * a;
     }
     if (p.mantling) {
-      b.upperArmL.rotation.x = -2.4;
-      b.upperArmR.rotation.x = -2.4;
-      b.lowerArmL.rotation.x = 0.6;
-      b.lowerArmR.rotation.x = 0.6;
-      b.upperLegL.rotation.x = 0.9;
-      b.lowerLegL.rotation.x = 1.2;
+      // Hands up on the ledge, one knee coming up after them.
+      b.upperArmL.rotation.x = 2.1;
+      b.upperArmR.rotation.x = 2.1;
+      b.lowerArmL.rotation.x = 0.5;
+      b.lowerArmR.rotation.x = 0.5;
+      b.upperLegL.rotation.x = 1.0;
+      b.lowerLegL.rotation.x = -1.3;
     }
     if (p.driving) {
-      b.upperArmR.rotation.x = -0.9;
+      b.upperArmR.rotation.x = 0.9;
       b.lowerArmR.rotation.x = 0.7;
-      b.upperArmL.rotation.x = -0.6;
+      b.upperArmL.rotation.x = 0.6;
       b.lowerArmL.rotation.x = 0.9;
     }
 
@@ -458,43 +509,44 @@ export class Humanoid {
     const held = p.held ?? '';
     const gun = held === 'revolver' || held === 'rifle' || held === 'coachgun';
     if (gun && !p.driving && !p.mantling) {
-      const raise = -Math.PI / 2 - p.pitch;
+      const raise = Math.PI / 2 + p.pitch;
       b.upperArmR.rotation.set(raise, 0, 0.12);
       b.lowerArmR.rotation.set(0, 0, 0);
       if (held !== 'revolver') {
-        b.upperArmL.rotation.set(raise + 0.25, 0, 0.75);
-        b.lowerArmL.rotation.set(-0.5, 0, 0);
+        b.upperArmL.rotation.set(raise - 0.25, 0, 0.75);
+        b.lowerArmL.rotation.set(0.5, 0, 0);
       }
       b.spine.rotation.y = 0;
     }
     if (p.carrying) {
-      // Both arms forward and low, hugging the load.
-      b.upperArmL.rotation.set(-1.0, 0, 0.35);
-      b.upperArmR.rotation.set(-1.0, 0, -0.35);
-      b.lowerArmL.rotation.set(-0.9, 0, 0);
-      b.lowerArmR.rotation.set(-0.9, 0, 0);
-      b.spine.rotation.x = -0.08;
+      // Both arms forward and low, hugging the load, leaning back against it.
+      b.upperArmL.rotation.set(1.0, 0, 0.35);
+      b.upperArmR.rotation.set(1.0, 0, -0.35);
+      b.lowerArmL.rotation.set(0.9, 0, 0);
+      b.lowerArmR.rotation.set(0.9, 0, 0);
+      b.spine.rotation.x = 0.08;
     }
     if (this.swingT > 0) {
+      // Overhead and down in front, the right shoulder turning into it.
       this.swingT = Math.max(0, this.swingT - dt * 3);
       const k = 1 - this.swingT;
-      b.upperArmR.rotation.set(-2.6 + k * 2.4, 0, 0.2);
-      b.lowerArmR.rotation.set(-0.3, 0, 0);
-      b.spine.rotation.y = 0.4 - k * 0.8;
+      b.upperArmR.rotation.set(2.6 - k * 2.4, 0, 0.2);
+      b.lowerArmR.rotation.set(0.3, 0, 0);
+      b.spine.rotation.y = -0.4 + k * 0.8;
     }
 
-    // Downed: lie on the side, propped on an arm.
+    // Downed: on the back, one knee up, an arm raised for help.
     this.down += ((p.downed ? 1 : 0) - this.down) * Math.min(1, dt * 5);
     if (this.down > 0.01) {
       const d = this.down;
-      b.hips.rotation.x = -1.35 * d;
+      b.hips.rotation.x = 1.35 * d;
       b.hips.rotation.z = 0.2 * d;
       b.hips.position.y = 0.95 - 0.68 * d;
       b.upperLegL.rotation.x *= 1 - d;
-      b.upperLegR.rotation.x = b.upperLegR.rotation.x * (1 - d) + 0.4 * d;
-      b.lowerLegR.rotation.x = b.lowerLegR.rotation.x * (1 - d) + 0.8 * d;
-      b.upperArmL.rotation.set(-2.2 * d, 0, -0.3 * d);
-      b.head.rotation.x = 0.8 * d;
+      b.upperLegR.rotation.x = b.upperLegR.rotation.x * (1 - d) + 0.5 * d;
+      b.lowerLegR.rotation.x = b.lowerLegR.rotation.x * (1 - d) - 0.9 * d;
+      b.upperArmL.rotation.set(2.2 * d, 0, -0.3 * d);
+      b.head.rotation.x = -0.8 * d;
     }
   }
 }
