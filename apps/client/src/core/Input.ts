@@ -29,6 +29,9 @@ export class Input {
   invertY = false;
   /** Buttons pressed since the last sample, so quick taps are never lost. */
   private latched = 0;
+  /** Key codes pressed since the last call to consumePressed(). */
+  private readonly pressed = new Set<string>();
+  private wheel = 0;
   enabled = true;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
@@ -39,6 +42,7 @@ export class Input {
     window.addEventListener('mouseup', this.onMouseUp);
     document.addEventListener('mousemove', this.onMouseMove);
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    window.addEventListener('wheel', this.onWheel, { passive: true });
   }
 
   get pointerLocked(): boolean {
@@ -74,6 +78,15 @@ export class Input {
     return { mx, my };
   }
 
+  /** Currently held buttons, without consuming taps (for per-frame checks like aiming). */
+  sampleHeld(): number {
+    let b = this.touch.buttons;
+    for (const code of this.keys) b |= BINDINGS[code] ?? 0;
+    if (this.mouse & 1) b |= Btn.Fire;
+    if (this.mouse & 2) b |= Btn.Aim;
+    return b;
+  }
+
   /** Held buttons plus any tapped since the last sample. */
   sampleButtons(): number {
     let b = this.latched | this.touch.buttons;
@@ -91,14 +104,33 @@ export class Input {
     this.canvas.removeEventListener('mousedown', this.onMouseDown);
     window.removeEventListener('mouseup', this.onMouseUp);
     document.removeEventListener('mousemove', this.onMouseMove);
+    window.removeEventListener('wheel', this.onWheel);
   }
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {
     if (!this.enabled || (e.target as HTMLElement)?.tagName === 'INPUT') return;
     if (e.code === 'Tab' || e.code === 'Space') e.preventDefault();
+    if (!e.repeat) this.pressed.add(e.code);
     this.keys.add(e.code);
     this.latched |= BINDINGS[e.code] ?? 0;
   };
+
+  private readonly onWheel = (e: WheelEvent): void => {
+    if (this.pointerLocked) this.wheel += Math.sign(e.deltaY);
+  };
+
+  /** Keys pressed since the last call (hotbar, heal). */
+  consumePressed(): Set<string> {
+    const out = new Set(this.pressed);
+    this.pressed.clear();
+    return out;
+  }
+
+  consumeWheel(): number {
+    const w = this.wheel;
+    this.wheel = 0;
+    return w;
+  }
 
   private readonly onKeyUp = (e: KeyboardEvent): void => {
     this.keys.delete(e.code);

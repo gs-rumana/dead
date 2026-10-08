@@ -29,6 +29,7 @@ export class CameraRig {
   update(
     dt: number,
     mode: CameraMode,
+    aim: number,
     frame: number,
     px: number,
     py: number,
@@ -69,6 +70,16 @@ export class CameraRig {
       cx = sx - fx * this.boom;
       cy = sy - fy * this.boom + 0.12;
       cz = sz - fz * this.boom;
+      if (aim > 0) {
+        // Iron sights: slide smoothly into the eye (§4.7: 0.2 s).
+        const k = aim * aim * (3 - 2 * aim);
+        const ex = px - Math.sin(yaw) * 0.05;
+        const ey = py + PLAYER.eyeHeight;
+        const ez = pz - Math.cos(yaw) * 0.05;
+        cx += (ex - cx) * k;
+        cy += (ey - cy) * k;
+        cz += (ez - cz) * k;
+      }
     }
     let lx = fx;
     let ly = fy;

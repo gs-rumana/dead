@@ -216,7 +216,6 @@ export class TrainView {
     this.carLocal(p, 0, 3.47, -4.5, ox, oz, this.headlamp.position);
     this.carLocal(p, 0, 1.0, -40, ox, oz, this.headlamp.target.position);
     this.headlamp.intensity = lit ? 60 * Math.min(1, (night - 0.25) * 3) : 0;
-    this.headlamp.visible = this.headlamp.intensity > 0;
     this.carLocal(p, 0, 3.47, -4.49, ox, oz, this.lampGlow.position);
     this.lampGlow.lookAt(this.carLocal(p, 0, 3.47, -10, ox, oz, this.v));
     (this.lampGlow.material as THREE.MeshBasicNodeMaterial).color.setScalar(lit ? 1.6 : 0.7);
@@ -224,7 +223,6 @@ export class TrainView {
     const f = 0.8 + Math.sin(this.flicker) * 0.1 + Math.sin(this.flicker * 2.7) * 0.08;
     this.carLocal(p, 0, 1.8, 3.1, ox, oz, this.fireLight.position);
     this.fireLight.intensity = fuel > 0 ? (1.5 + night * 5) * f : 0;
-    this.fireLight.visible = this.fireLight.intensity > 0;
   }
 
   private emitSmoke(dt: number, p: CarPose, speed: number, throttle: number, fuel: number): void {

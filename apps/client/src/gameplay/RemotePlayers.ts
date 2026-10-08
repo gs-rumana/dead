@@ -8,7 +8,7 @@ import {
   trainToWorld,
   trainYawAt,
 } from '@dead-tracks/shared';
-import { paletteSkinnedMaterial } from '../render/materials.ts';
+import { paletteMaterial, paletteSkinnedMaterial } from '../render/materials.ts';
 import { type Humanoid, OUTFITS, createHumanoid } from '../render/models/humanoid.ts';
 
 interface Snapshot {
@@ -21,6 +21,8 @@ interface Snapshot {
   pitch: number;
   flags: number;
   mantle: number;
+  held: string;
+  life: number;
 }
 
 interface Remote {
@@ -30,6 +32,9 @@ interface Remote {
   lastX: number;
   lastZ: number;
   speed: number;
+  wx: number;
+  wy: number;
+  wz: number;
 }
 
 /** Interpolation delay for other players (§6.8: ~100 ms buffer). */
@@ -62,7 +67,7 @@ export class RemotePlayers {
         const body = createHumanoid(outfit, paletteSkinnedMaterial());
         body.mesh.castShadow = true;
         this.scene.add(body.mesh);
-        r = { id, body, buf: [], lastX: 0, lastZ: 0, speed: 0 };
+        r = { id, body, buf: [], lastX: 0, lastZ: 0, speed: 0, wx: 0, wy: 0, wz: 0 };
         this.remotes.set(id, r);
       }
       r.buf.push({
@@ -75,6 +80,8 @@ export class RemotePlayers {
         pitch: p.pitch,
         flags: p.flags,
         mantle: p.mantle,
+        held: p.held,
+        life: p.life,
       });
       if (r.buf.length > 30) r.buf.shift();
     });
@@ -119,8 +126,13 @@ export class RemotePlayers {
         wz = this.w.z;
         yaw += trainYawAt(poses, z);
       }
+      r.wx = wx;
+      r.wy = wy;
+      r.wz = wz;
       const mesh = r.body.mesh;
+      mesh.visible = src.life !== 2;
       mesh.position.set(wx - ox, wy, wz - oz);
+      r.body.setHeld(src.held, paletteMaterial());
       mesh.rotation.set(0, yaw, 0);
       // Speed relative to the frame drives the gait.
       const sp = dt > 0 ? Math.hypot(x - r.lastX, z - r.lastZ) / dt : 0;
@@ -134,8 +146,19 @@ export class RemotePlayers {
         driving: (src.flags & PlayerFlag.Driving) !== 0,
         mantling: src.mantle > 0,
         sprinting: (src.flags & PlayerFlag.Sprinting) !== 0,
+        held: src.held,
+        downed: src.life !== 0,
       });
     }
+  }
+
+  swing(id: string): void {
+    this.remotes.get(id)?.body.swing();
+  }
+
+  worldPosition(id: string): { x: number; y: number; z: number } | null {
+    const r = this.remotes.get(id);
+    return r ? { x: r.wx, y: r.wy, z: r.wz } : null;
   }
 
   get count(): number {

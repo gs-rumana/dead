@@ -3,6 +3,9 @@ import { createRenderer } from '../render/createRenderer.ts';
 import { paletteMaterial, paletteSkinnedMaterial } from '../render/materials.ts';
 import { OUTFITS, createHumanoid } from '../render/models/humanoid.ts';
 import { PROP_KINDS, buildProp, buildTelegraphPole } from '../render/models/props.ts';
+import { ZOMBIE_OUTFITS } from '../render/models/humanoid.ts';
+import { bakeVat, type ClipName } from '../render/vat.ts';
+import { createVatInstances } from '../render/vatMaterial.ts';
 import {
   DRIVER_RADIUS,
   GAUGE_HALF,
@@ -92,13 +95,34 @@ export async function runViewer(
       group.add(h.mesh);
     });
   }
+  if (which === 'horde') {
+    const clips: ClipName[] = ['idle', 'walk', 'run', 'attack', 'dead', 'climb', 'crouch'];
+    (['walker', 'runner', 'brute'] as const).forEach((body, row) => {
+      const asset = bakeVat(ZOMBIE_OUTFITS[body]);
+      const inst = createVatInstances(asset, 16);
+      clips.forEach((clip, i) => {
+        const c = asset.clips[clip];
+        const f = c.loop ? 3 : c.frames - 1;
+        inst.posYaw.setXYZW(i, (i - 3) * 1.6, -0.3, row * 2.4 - 2.4, 0.3);
+        inst.anim.setXYZW(i, c.start + f, c.start + f, 0, body === 'brute' ? 1.35 : 1);
+        // Show gore masks on a few: head off, arm off, leg off.
+        inst.fx.setXYZW(i, i === 0 ? 1 : i === 1 ? 4 : i === 2 ? 8 : 0, i === 3 ? 0.8 : 0, 1, 0);
+      });
+      inst.mesh.count = clips.length;
+      tris += (asset.vertexCount / 3) * clips.length;
+      scene.add(inst.mesh);
+    });
+  }
   group.traverse((o) => {
     const g = (o as THREE.Mesh).geometry;
     if (g) tris += (g.index ? g.index.count : g.getAttribute('position').count) / 3;
   });
   void GAUGE_HALF;
 
-  const box = new THREE.Box3().setFromObject(group);
+  const box =
+    which === 'horde'
+      ? new THREE.Box3(new THREE.Vector3(-6, -0.3, -4), new THREE.Vector3(6, 2.2, 4))
+      : new THREE.Box3().setFromObject(group);
   const centre = box.getCenter(new THREE.Vector3());
   const size = box.getSize(new THREE.Vector3()).length();
   const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 0.1, 500);

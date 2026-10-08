@@ -68,7 +68,13 @@ export function App({ onStart }: Props) {
           />
         )}
         {devOpen && <DevPanel game={game} />}
-        {isTouchDevice() && <TouchControls input={game.input} />}
+        {isTouchDevice() && (
+          <TouchControls
+            input={game.input}
+            onSwap={() => game.cycleWeapon(1)}
+            onHeal={() => game.heal()}
+          />
+        )}
         {config.perfHud && <PerfHud conn={game.conn} />}
         {game.conn.kind === 'online' && (
           <div class="party-code" data-testid="party-code">

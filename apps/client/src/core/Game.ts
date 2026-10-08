@@ -1,8 +1,15 @@
 import * as THREE from 'three/webgpu';
 import {
   CONSIST,
+  Btn,
   Frame,
+  Life,
   type MotorContext,
+  PLAYER,
+  WEAPONS,
+  type WeaponId,
+  nextFeature,
+  routeFeatures,
   PhysicsSpace,
   Route,
   TRAIN,
@@ -16,12 +23,19 @@ import {
   inputToWire,
   SIM_DT,
 } from '@dead-tracks/shared';
+import type { GameEvent } from '@dead-tracks/shared';
 import type { Connection } from '../net/Connection.ts';
 import { backendName, createRenderer } from '../render/createRenderer.ts';
 import { paletteSkinnedMaterial } from '../render/materials.ts';
 import { type Humanoid, OUTFITS, createHumanoid } from '../render/models/humanoid.ts';
 import { Sky } from '../render/Sky.ts';
 import { CameraRig } from '../gameplay/CameraRig.ts';
+import { Effects } from '../gameplay/Effects.ts';
+import { EnemyView } from '../gameplay/EnemyView.ts';
+import { INTERP_DELAY } from '../gameplay/RemotePlayers.ts';
+import { Viewmodel } from '../gameplay/Viewmodel.ts';
+import { Weapons } from '../gameplay/Weapons.ts';
+import { paletteMaterial } from '../render/materials.ts';
 import { LocalPlayer } from '../gameplay/LocalPlayer.ts';
 import { RemotePlayers } from '../gameplay/RemotePlayers.ts';
 import { TrainClock } from '../gameplay/TrainClock.ts';
@@ -92,6 +106,16 @@ export class Game {
   private readonly tmpW = { x: 0, y: 0, z: 0 };
   audio: AudioEngine | null = null;
   private lastClickS = 0;
+  private enemyView!: EnemyView;
+  private effects!: Effects;
+  private weapons!: Weapons;
+  private viewmodel!: Viewmodel;
+  private prevButtons = 0;
+  private hurtFlash = 0;
+  private shakeT = 0;
+  private groanT = 2;
+  private viewDelayT = 0;
+  private features = routeFeatures(0);
   private readonly disposers: Array<() => void> = [];
 
   constructor(
@@ -141,6 +165,24 @@ export class Game {
     this.selfBody = createHumanoid(OUTFITS[0]!, paletteSkinnedMaterial());
     this.selfBody.mesh.castShadow = true;
     this.scene.add(this.selfBody.mesh);
+    this.features = routeFeatures(seed);
+    this.enemyView = new EnemyView(this.scene, this.terrain);
+    this.effects = new Effects(this.scene);
+    this.effects.gore = this.settings.gore;
+    this.viewmodel = new Viewmodel();
+    this.weapons = new Weapons({
+      conn: this.conn,
+      space: this.space,
+      enemies: this.enemyView,
+      effects: this.effects,
+      audio: () => this.audio,
+      camera: this.camera,
+      origin: () => ({ x: this.originX, z: this.originZ }),
+      eye: () => this.eyeWorld(),
+      inventory: () => this.conn.state.players.get(this.conn.selfId)?.inv,
+      alive: () => (this.conn.state.players.get(this.conn.selfId)?.life ?? 0) === Life.Alive,
+      driving: () => this.local.motor.driving,
+    });
 
     this.applyQuality();
     // §6.9: a short benchmark after the world has streamed in can lower the tier.
@@ -165,11 +207,7 @@ export class Game {
     this.disposers.push(
       this.conn.onPatch(() => this.onPatch()),
       this.conn.onEvents((events) => {
-        for (const ev of events) {
-          if (ev.e === 'toast') toast(ev.text);
-          else if (ev.e === 'whistle') this.audio?.whistle();
-          else if (ev.e === 'stoke') this.audio?.stoke();
-        }
+        for (const ev of events) this.onEvent(ev);
       }),
     );
     // Audio needs a user gesture (iOS: tap to start).
@@ -216,11 +254,29 @@ export class Game {
     hud.ready = false;
   }
 
+  /** Next weapon in the hotbar (touch "Swap" button, mouse wheel). */
+  cycleWeapon(dir: number): void {
+    const inv = this.conn.state.players.get(this.conn.selfId)?.inv;
+    if (!inv) return;
+    const n = inv.slots.length;
+    let slot = inv.selected;
+    for (let k = 0; k < n; k++) {
+      slot = (slot + (dir > 0 ? 1 : -1) + n) % n;
+      if (inv.slots[slot]) break;
+    }
+    this.conn.send('cmd', { t: 'equip', slot });
+  }
+
+  heal(): void {
+    this.conn.send('cmd', { t: 'heal' });
+  }
+
   /** Re-applies saved settings after the menu changes them. */
   applySettings(): void {
     const s = this.settings;
     this.input.sensitivity = s.sensitivity;
     this.input.invertY = s.invertY;
+    this.effects.gore = s.gore;
     this.audio?.setVolumes(s.masterVolume, s.effectsVolume);
     const tier: QualityTier = s.quality === 'auto' ? this.quality.tier : s.quality;
     if (tier !== this.quality.tier) this.setQuality(tier);
@@ -247,6 +303,8 @@ export class Game {
       pixelRatio: this.pixelRatio,
       lookYaw: this.lookYaw,
       remotes: this.remotes.count,
+      enemies: this.enemyView.count,
+      lastShot: this.weapons.lastShot,
       scene: this.scene,
       /** Camera position in train space: steady numbers mean no jitter on the train. */
       cameraInTrain: () =>
@@ -264,6 +322,47 @@ export class Game {
   look(yaw: number, pitch: number): void {
     this.lookYaw = yaw;
     this.lookPitch = pitch;
+  }
+
+  /** Test hook: turn toward the nearest living enemy's chest (or head). Returns its id. */
+  aimAtNearestEnemy(head = false): string | null {
+    const eye = this.eyeWorld();
+    let best: { id: string; x: number; y: number; z: number; d: number } | null = null;
+    this.enemyView.forEach((id, _type, x, y, z, dead) => {
+      if (dead) return;
+      const d = Math.hypot(x - eye.x, z - eye.z);
+      if (!best || d < best.d) best = { id, x, y, z, d };
+    });
+    if (!best) return null;
+    const b = best as { id: string; x: number; y: number; z: number; d: number };
+    const ty = b.y + (head ? 1.66 : 1.15);
+    // The crosshair ray passes through the camera's shoulder pivot, so aim from there.
+    const offset =
+      this.local.motor.frame === Frame.Train
+        ? trainYawAt(this.trainView.poses, this.local.motor.z)
+        : 0;
+    let yaw = Math.atan2(-(b.x - eye.x), -(b.z - eye.z));
+    for (let i = 0; i < 3; i++) {
+      const px = eye.x + Math.cos(yaw) * 0.45;
+      const pz = eye.z - Math.sin(yaw) * 0.45;
+      yaw = Math.atan2(-(b.x - px), -(b.z - pz));
+    }
+    const px = eye.x + Math.cos(yaw) * 0.45;
+    const pz = eye.z - Math.sin(yaw) * 0.45;
+    this.lookYaw = yaw - offset;
+    this.lookPitch = Math.atan2(ty - eye.y, Math.hypot(b.x - px, b.z - pz));
+    return b.id;
+  }
+
+  /** Test hook: pull the trigger now. */
+  trigger(): void {
+    this.weapons.trigger(performance.now());
+  }
+
+  /** Test hook: hold or release iron sights. */
+  setAim(on: boolean): void {
+    if (on) this.input.touch.buttons |= Btn.Aim;
+    else this.input.touch.buttons &= ~Btn.Aim;
   }
 
   private applyQuality(): void {
@@ -309,6 +408,112 @@ export class Game {
       if (this.local.motor.frame !== before) this.lookYaw = this.local.motor.yaw;
     }
     this.remotes.sample(state, now);
+    this.enemyView.sample(state, now);
+  }
+
+  private eyeWorld(): { x: number; y: number; z: number } {
+    const p = this.selfBody.mesh.position;
+    return { x: p.x + this.originX, y: p.y + PLAYER.eyeHeight, z: p.z + this.originZ };
+  }
+
+  private renderPos(wx: number, wy: number, wz: number): { x: number; y: number; z: number } {
+    return { x: wx - this.originX, y: wy, z: wz - this.originZ };
+  }
+
+  private onEvent(ev: GameEvent): void {
+    const self = this.conn.selfId;
+    switch (ev.e) {
+      case 'toast':
+        toast(ev.text);
+        break;
+      case 'whistle':
+        this.audio?.whistle();
+        break;
+      case 'stoke':
+        this.audio?.stoke();
+        break;
+      case 'shot':
+        if (ev.by === self) break;
+        this.effects.muzzle(
+          ev.ox + ev.dx * 0.6,
+          ev.oy - 0.2,
+          ev.oz + ev.dz * 0.6,
+          ev.w === 'coachgun' ? 1.4 : 1,
+        );
+        this.effects.tracer(
+          ev.ox + ev.dx * 0.6,
+          ev.oy - 0.2,
+          ev.oz + ev.dz * 0.6,
+          ev.ox + ev.dx * 60,
+          ev.oy + ev.dy * 60,
+          ev.oz + ev.dz * 60,
+        );
+        this.audio?.gunshot(ev.w, this.renderPos(ev.ox, ev.oy, ev.oz));
+        break;
+      case 'hit': {
+        this.enemyView.flash(ev.id);
+        const ground = this.terrain.height(ev.x, ev.z);
+        const head = ev.zone === 1;
+        this.effects.blood(ev.x, ev.y, ev.z, ev.kill ? 1.6 : 1, ground);
+        if (ev.kill && (head || ev.by === 'train')) this.effects.gib(ev.x, ev.y, ev.z, ground);
+        this.audio?.hitFlesh(head, this.renderPos(ev.x, ev.y, ev.z));
+        if (ev.by === self) {
+          this.weapons.confirmHit(ev.kill);
+          this.audio?.hitTick(ev.kill);
+        }
+        break;
+      }
+      case 'swing':
+        if (ev.by !== self) this.remotes.swing(ev.by);
+        else this.selfBody.swing();
+        break;
+      case 'explode': {
+        const cam = this.rig.worldPos;
+        this.effects.explosion(
+          ev.x,
+          ev.y,
+          ev.z,
+          ev.r,
+          ev.holy,
+          Math.hypot(cam.x - ev.x, cam.y - ev.y, cam.z - ev.z),
+        );
+        this.audio?.explosion(this.renderPos(ev.x, ev.y, ev.z));
+        break;
+      }
+      case 'hurt':
+        if (ev.id === self) {
+          this.hurtFlash = Math.min(1, this.hurtFlash + ev.dmg / 30);
+          this.shakeT = Math.max(this.shakeT, 0.25);
+          this.audio?.hurt();
+        }
+        break;
+      case 'downed':
+        toast(
+          ev.id === self
+            ? 'You are down! Hold E to use a tonic, or wait for a teammate.'
+            : `${this.nameOf(ev.id)} is down!`,
+        );
+        break;
+      case 'revived':
+        toast(ev.id === self ? 'Back on your feet.' : `${this.nameOf(ev.id)} was revived.`);
+        break;
+      case 'died':
+        toast(
+          ev.id === self
+            ? 'You bled out. You will return at the next station.'
+            : `${this.nameOf(ev.id)} bled out.`,
+        );
+        break;
+      case 'respawned':
+        if (ev.id === self) toast('You climb back aboard at the station.');
+        break;
+      case 'enemyAttack':
+        break;
+    }
+  }
+
+  private nameOf(id: string): string {
+    return this.conn.state.players.get(id)?.name ?? 'Someone';
   }
 
   private readonly frame = (): void => {
@@ -328,8 +533,15 @@ export class Game {
 
     // Look (every frame, for responsiveness).
     const look = this.input.consumeLook();
-    this.lookYaw -= look.dx;
-    this.lookPitch = Math.max(-1.45, Math.min(1.45, this.lookPitch - look.dy));
+    const zoom = 1 - this.weapons.aimT * 0.3;
+    this.lookYaw -= look.dx * zoom;
+    this.lookPitch = Math.max(
+      -1.45,
+      Math.min(1.45, this.lookPitch - look.dy * zoom + this.weapons.drift),
+    );
+    this.weapons.drift = 0;
+    const aimHeld = (this.input.sampleHeld() & Btn.Aim) !== 0;
+    this.weapons.update(dt, aimHeld);
 
     // Train position (smoothed) and poses for prediction and rendering.
     const train = this.conn.state.train;
@@ -388,6 +600,9 @@ export class Game {
     this.selfSpeed += (Math.min(sp, 9) - this.selfSpeed) * Math.min(1, dt * 12);
     this.lastSelfX = lx;
     this.lastSelfZ = lz;
+    const me = this.conn.state.players.get(this.conn.selfId);
+    const held = me?.held ?? '';
+    this.selfBody.setHeld(held, paletteMaterial());
     this.selfBody.animate(dt, {
       speed: this.selfSpeed,
       grounded: m.grounded,
@@ -395,26 +610,60 @@ export class Game {
       driving: m.driving,
       mantling: m.mantle > 0,
       sprinting: m.sprinting,
+      held: m.driving ? '' : held,
+      downed: (me?.life ?? 0) !== Life.Alive,
     });
 
+    const aim = this.weapons.aimT;
     const firstPerson = m.driving;
-    this.selfBody.mesh.visible = !firstPerson;
+    this.selfBody.mesh.visible = !firstPerson && aim < 0.6 && (me?.life ?? 0) !== Life.Dead;
+    // Camera shake from hits and explosions.
+    this.shakeT = Math.max(0, this.shakeT - dt);
+    const shakeAmt = this.settings.cameraShake
+      ? Math.max(this.shakeT * 0.06, this.effects.shake * 0.08)
+      : 0;
+    this.effects.shake = Math.max(0, this.effects.shake - dt * 2);
+    const sx = (Math.random() - 0.5) * shakeAmt;
+    const sy = (Math.random() - 0.5) * shakeAmt;
     this.rig.update(
       dt,
       firstPerson ? 'first' : 'third',
+      aim,
       m.frame,
       lx,
       ly,
       lz,
-      this.lookYaw,
-      this.lookPitch,
+      this.lookYaw + sx,
+      this.lookPitch + this.weapons.kick + sy,
       this.trainView.poses,
       this.space,
       this.originX,
       this.originZ,
     );
+    // Iron sights zoom the view a little (§4.7).
+    const fov =
+      this.settings.fov * (window.innerWidth < window.innerHeight ? 1.25 : 1) * (1 - aim * 0.28);
+    if (Math.abs(this.camera.fov - fov) > 0.01) {
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+    }
 
     this.remotes.update(dt, now, this.trainView.poses, this.originX, this.originZ);
+    this.enemyView.update(
+      dt,
+      now,
+      this.trainView.poses,
+      this.originX,
+      this.originZ,
+      this.sky.night,
+    );
+    this.effects.update(dt, this.originX, this.originZ);
+    this.ambientGroans(dt);
+    this.viewDelayT -= dt;
+    if (this.viewDelayT <= 0) {
+      this.viewDelayT = 1;
+      this.conn.send('viewDelay', (this.conn.stats.rttMs / 2 + INTERP_DELAY) / 1000);
+    }
 
     // World streaming around the camera, floating origin (§6.7).
     const cam = this.rig.worldPos;
@@ -431,7 +680,22 @@ export class Game {
     this.updateShadowCamera();
 
     this.renderer.info.reset();
+    this.renderer.autoClear = false;
+    this.renderer.clear();
     this.renderer.render(this.scene, this.camera);
+    if (aim > 0.55 && held) {
+      // The gun and arms in their own pass (§6.9).
+      this.viewmodel.setWeapon(held);
+      this.viewmodel.syncLights(this.sky.hemi, this.sky.sun);
+      this.viewmodel.update(
+        dt,
+        this.camera.aspect,
+        (me?.inv?.reload ?? 0) > 0,
+        this.selfSpeed * now * 0.002,
+      );
+      this.renderer.clearDepth();
+      this.renderer.render(this.viewmodel.scene, this.viewmodel.camera);
+    }
     perf.drawCalls = this.renderer.info.render.drawCalls;
     perf.triangles = this.renderer.info.render.triangles;
     perf.pixelRatio = this.pixelRatio;
@@ -471,6 +735,22 @@ export class Game {
   private inputTick(): void {
     const axes = this.input.axes();
     const buttons = this.input.sampleButtons();
+    const pressed = buttons & ~this.prevButtons;
+    this.prevButtons = buttons;
+    if (pressed & Btn.Fire && !this.local.motor.driving) {
+      this.weapons.trigger(performance.now());
+      const w = this.weapons.held();
+      if (w?.kind === 'gun') this.viewmodel.fire(w.recoil);
+      else if (w?.kind === 'melee') this.viewmodel.melee();
+    }
+    const keys = this.input.consumePressed();
+    const inv = this.conn.state.players.get(this.conn.selfId)?.inv;
+    for (let i = 1; i <= 6; i++) {
+      if (keys.has(`Digit${i}`)) this.conn.send('cmd', { t: 'equip', slot: i - 1 });
+    }
+    const wheel = this.input.consumeWheel();
+    if (wheel !== 0 && inv) this.cycleWeapon(wheel);
+    if (keys.has('KeyQ')) this.conn.send('cmd', { t: 'heal' });
     const before = this.local.motor.frame;
     const input = this.local.tick({
       mx: axes.mx,
@@ -587,6 +867,82 @@ export class Game {
       const loco = this.trainView.locoPose;
       hud.distanceToTrain = Math.hypot(loco.cx - m.x, loco.cz - m.z);
     } else hud.distanceToTrain = 0;
+
+    // Combat.
+    const inv = me?.inv;
+    const w = this.weapons.held();
+    hud.weapon = w?.name ?? '';
+    hud.isGun = w?.kind === 'gun';
+    hud.mag = this.weapons.magazine();
+    hud.reserve = this.weapons.reserve();
+    hud.reloading = (inv?.reload ?? 0) > 0;
+    hud.slots = inv ? inv.slots.toArray() : [];
+    hud.selected = inv?.selected ?? 0;
+    hud.bandage = inv?.bandage ?? 0;
+    hud.tonic = inv?.tonic ?? 0;
+    hud.dynamite = inv?.dynamite ?? 0;
+    hud.holywater = inv?.holywater ?? 0;
+    hud.cash = inv?.cash ?? 0;
+    hud.aim = this.weapons.aimT;
+    hud.spread = w?.kind === 'gun' ? w.hipSpread * (1 + this.weapons.bloom) : 0;
+    hud.hitMarker = this.weapons.hitMarker;
+    hud.hitKill = this.weapons.hitKill;
+    hud.hurt = this.hurtFlash;
+    hud.life = me?.life ?? 0;
+    hud.bleed = me?.bleed ?? 0;
+    hud.revive = me?.revive ?? 0;
+    hud.over = this.conn.state.players.size > 0 && this.isOver();
+    hud.enemies = this.enemyView.count;
+    if (hud.life === Life.Dead) {
+      const next = nextFeature(this.features, this.trainClock.s, ['station', 'start', 'fort']);
+      hud.respawnKm = next ? next.km : 0;
+    }
+    if (!m.driving && hud.life === Life.Alive) {
+      const downed = this.downedTeammate();
+      if (downed)
+        hud.prompt = `Hold to revive ${downed} (${hud.bandage} bandage, ${hud.tonic} tonic)`;
+    } else if (hud.life === Life.Downed && hud.tonic > 0) {
+      hud.prompt = 'Use your tonic';
+    }
+  }
+
+  private isOver(): boolean {
+    let up = 0;
+    this.conn.state.players.forEach((p) => {
+      if (p.life === Life.Alive) up++;
+    });
+    const me = this.conn.state.players.get(this.conn.selfId);
+    return up === 0 && !(this.conn.state.players.size === 1 && (me?.inv?.tonic ?? 0) > 0);
+  }
+
+  private downedTeammate(): string | null {
+    const eye = this.eyeWorld();
+    let name: string | null = null;
+    this.conn.state.players.forEach((p, id) => {
+      if (id === this.conn.selfId || p.life !== Life.Downed) return;
+      const pos = this.remotes.worldPosition(id);
+      if (pos && Math.hypot(pos.x - eye.x, pos.y - (eye.y - PLAYER.eyeHeight), pos.z - eye.z) < 2.2)
+        name = p.name;
+    });
+    return name;
+  }
+
+  /** Nearby undead moan now and then (cosmetic, client-side). */
+  private ambientGroans(dt: number): void {
+    this.groanT -= dt;
+    if (this.groanT > 0 || !this.audio?.running) return;
+    this.groanT = 0.8 + Math.random() * 2.2;
+    const eye = this.eyeWorld();
+    const near: Array<{ x: number; y: number; z: number; type: string }> = [];
+    this.enemyView.forEach((_id, type, x, y, z, dead) => {
+      if (!dead && Math.hypot(x - eye.x, z - eye.z) < 30) near.push({ x, y, z, type });
+    });
+    const e = near[Math.floor(Math.random() * near.length)];
+    if (e)
+      this.audio.groan(
+        this.renderPos(e.x, e.y + 1.6, e.z),
+        e.type === 'brute' ? 0.7 : e.type === 'runner' ? 1.2 : 1,
+      );
   }
 
   private readonly resize = (): void => {
@@ -598,6 +954,10 @@ export class Game {
     this.camera.fov = this.settings.fov * (w < h ? 1.25 : 1);
     this.camera.updateProjectionMatrix();
   };
+
+  get weaponDefs() {
+    return WEAPONS as Record<WeaponId, (typeof WEAPONS)[WeaponId]>;
+  }
 
   private readonly onPointerLock = (): void => {
     hud.pointerLocked = this.input.pointerLocked;

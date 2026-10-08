@@ -1,4 +1,5 @@
 import { Room, matchMaker, type Client } from '@colyseus/core';
+import { StateView } from '@colyseus/schema';
 import { type JoinOptions, type RunState, MAX_PARTY, PATCH_MS, SIM_DT } from '@dead-tracks/shared';
 import { type HostClient, RunHost } from '@dead-tracks/sim/host';
 import { playerJoined, playerLeft, recordTick, roomClosed, roomOpened } from '../metrics.ts';
@@ -43,8 +44,10 @@ export class RunRoom extends Room<{ state: RunState }> {
   }
 
   override onJoin(client: Client, options: JoinOptions): void {
+    client.view = new StateView();
     const hc: HostClient = {
       id: client.sessionId,
+      view: client.view,
       send: (type, msg) => client.send(type, msg),
     };
     this.hostClients.set(client.sessionId, hc);
@@ -64,8 +67,10 @@ export class RunRoom extends Room<{ state: RunState }> {
   }
 
   override onReconnect(client: Client): void {
+    client.view ??= new StateView();
     const hc: HostClient = {
       id: client.sessionId,
+      view: client.view,
       send: (type, msg) => client.send(type, msg),
     };
     this.hostClients.set(client.sessionId, hc);

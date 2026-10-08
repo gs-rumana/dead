@@ -28,7 +28,7 @@ export interface EnemyDef {
 export const ENEMIES: Record<EnemyType, EnemyDef> = {
   walker: {
     type: 'walker',
-    hp: 70,
+    hp: 65,
     speed: 1.1,
     chaseSpeed: 1.9,
     damage: 12,

@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { type Swatch, swatchUV } from '../palette.ts';
+import { weaponModel } from './weapons.ts';
 
 /**
  * A low-poly humanoid with realistic proportions (§5.1, §5.5) on one shared
@@ -60,6 +61,27 @@ export interface Outfit {
   hair?: Swatch;
   bandana?: Swatch;
 }
+
+/** Undead outfits (§5.5: the same bodies with rotting skin and torn clothes). */
+export const ZOMBIE_OUTFITS: Record<'walker' | 'runner' | 'brute', Outfit> = {
+  walker: {
+    skin: 'rot1',
+    shirt: 'shirt',
+    pants: 'denim',
+    boots: 'leather',
+    vest: 'blood',
+    hair: 'hair',
+  },
+  runner: { skin: 'rot2', shirt: 'shirtRed', pants: 'dusterDark', boots: 'hatDark' },
+  brute: {
+    skin: 'rot1',
+    shirt: 'blood',
+    pants: 'duster',
+    boots: 'leather',
+    vest: 'dusterDark',
+    bandana: 'bandana',
+  },
+};
 
 export const OUTFITS: Outfit[] = [
   {
@@ -166,6 +188,27 @@ function parts(o: Outfit): Part[] {
   return out;
 }
 
+/** Gore part bit for each bone (0 = never removed). Matches GoreBit in the sim. */
+export const BONE_PART: Record<BoneName, number> = {
+  hips: 0,
+  spine: 0,
+  chest: 0,
+  neck: 0,
+  head: 1,
+  upperArmL: 2,
+  lowerArmL: 2,
+  handL: 2,
+  upperArmR: 4,
+  lowerArmR: 4,
+  handR: 4,
+  upperLegL: 8,
+  lowerLegL: 8,
+  footL: 8,
+  upperLegR: 16,
+  lowerLegR: 16,
+  footR: 16,
+};
+
 /** Skinned geometry for an outfit (rigid weights: one bone per vertex). */
 export function buildHumanoidGeometry(o: Outfit): THREE.BufferGeometry {
   const geos: THREE.BufferGeometry[] = [];
@@ -249,6 +292,10 @@ export interface PoseInput {
   driving: boolean;
   mantling: boolean;
   sprinting: boolean;
+  /** Held item id ('' for empty hands). */
+  held?: string;
+  /** Lying on the ground: downed or dead (§4.9). */
+  downed?: boolean;
 }
 
 /** Procedural animation: walk/run cycle, idle breathing, jump, mantle and driving poses. */
@@ -257,11 +304,42 @@ export class Humanoid {
   private idle = Math.random() * 10;
   private air = 0;
   private gait = 0;
+  private heldId = '';
+  private heldMesh: THREE.Mesh | null = null;
+  private swingT = 0;
+  private down = 0;
 
   constructor(
     readonly mesh: THREE.SkinnedMesh,
     readonly bones: Record<BoneName, THREE.Bone>,
   ) {}
+
+  /** Puts a weapon or tool in the right hand. */
+  setHeld(id: string, material: THREE.Material): void {
+    if (id === this.heldId) return;
+    this.heldId = id;
+    if (this.heldMesh) this.bones.handR.remove(this.heldMesh);
+    this.heldMesh = null;
+    const model = id ? weaponModel(id) : null;
+    if (!model) return;
+    const m = new THREE.Mesh(model.geometry, material);
+    // Gun axes onto the hand: barrel along the fingers (-Y), top of the gun forward (+Z).
+    const basis = new THREE.Matrix4().makeBasis(
+      new THREE.Vector3(-1, 0, 0),
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0, 1, 0),
+    );
+    m.quaternion.setFromRotationMatrix(basis);
+    m.position.set(0, -0.07, 0.01);
+    m.castShadow = true;
+    this.heldMesh = m;
+    this.bones.handR.add(m);
+  }
+
+  /** Plays a melee swing. */
+  swing(): void {
+    this.swingT = 1;
+  }
 
   animate(dt: number, p: PoseInput): void {
     const b = this.bones;
@@ -322,6 +400,41 @@ export class Humanoid {
       b.lowerArmR.rotation.x = 0.7;
       b.upperArmL.rotation.x = -0.6;
       b.lowerArmL.rotation.x = 0.9;
+    }
+
+    // Weapons: guns point where the player looks; tools swing.
+    const held = p.held ?? '';
+    const gun = held === 'revolver' || held === 'rifle' || held === 'coachgun';
+    if (gun && !p.driving && !p.mantling) {
+      const raise = -Math.PI / 2 - p.pitch;
+      b.upperArmR.rotation.set(raise, 0, 0.12);
+      b.lowerArmR.rotation.set(0, 0, 0);
+      if (held !== 'revolver') {
+        b.upperArmL.rotation.set(raise + 0.25, 0, 0.75);
+        b.lowerArmL.rotation.set(-0.5, 0, 0);
+      }
+      b.spine.rotation.y = 0;
+    }
+    if (this.swingT > 0) {
+      this.swingT = Math.max(0, this.swingT - dt * 3);
+      const k = 1 - this.swingT;
+      b.upperArmR.rotation.set(-2.6 + k * 2.4, 0, 0.2);
+      b.lowerArmR.rotation.set(-0.3, 0, 0);
+      b.spine.rotation.y = 0.4 - k * 0.8;
+    }
+
+    // Downed: lie on the side, propped on an arm.
+    this.down += ((p.downed ? 1 : 0) - this.down) * Math.min(1, dt * 5);
+    if (this.down > 0.01) {
+      const d = this.down;
+      b.hips.rotation.x = -1.35 * d;
+      b.hips.rotation.z = 0.2 * d;
+      b.hips.position.y = 0.95 - 0.68 * d;
+      b.upperLegL.rotation.x *= 1 - d;
+      b.upperLegR.rotation.x = b.upperLegR.rotation.x * (1 - d) + 0.4 * d;
+      b.lowerLegR.rotation.x = b.lowerLegR.rotation.x * (1 - d) + 0.8 * d;
+      b.upperArmL.rotation.set(-2.2 * d, 0, -0.3 * d);
+      b.head.rotation.x = 0.8 * d;
     }
   }
 }

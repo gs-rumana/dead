@@ -82,7 +82,8 @@ export class LocalRoom {
   }
 
   private sendPatch(): void {
-    if (!this.encoder.hasChanges) return;
+    // Same as the server's SchemaSerializer: shared changes plus this view's changes.
+    if (!this.encoder.hasChanges && this.view.changes.size === 0) return;
     const it = { offset: 0 };
     let bytes = this.encoder.encode(it);
     if (this.encoder.context.hasFilters) {

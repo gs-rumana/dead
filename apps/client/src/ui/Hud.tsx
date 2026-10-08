@@ -71,6 +71,16 @@ function Bar({ value, max, cls }: { value: number; max: number; cls: string }) {
   );
 }
 
+const SHORT: Record<string, string> = {
+  revolver: 'Revolver',
+  rifle: 'Rifle',
+  coachgun: 'Coach gun',
+  shovel: 'Shovel',
+  hatchet: 'Hatchet',
+  dynamite: 'Dynamite',
+  holywater: 'Holy water',
+};
+
 function clock(phase: number): string {
   // Day 0..0.6 maps 06:00 → 18:00; night 0.6..1 maps 18:00 → 06:00.
   const hours = phase < 0.6 ? 6 + (phase / 0.6) * 12 : 18 + ((phase - 0.6) / 0.4) * 12;
@@ -87,7 +97,7 @@ export function Hud({ onMenu }: { onMenu: () => void }) {
   const isNight = hud.dayPhase >= 0.6;
   const km = Math.min(80, hud.km);
   return (
-    <div class="hud" data-testid="hud">
+    <div class={hud.touch ? 'hud touch-ui' : 'hud'} data-testid="hud">
       <div class="route">
         <div class="route-row">
           <span class="time" title="Time of day">
@@ -105,7 +115,75 @@ export function Hud({ onMenu }: { onMenu: () => void }) {
         </div>
       </div>
 
-      {!hud.driving && <div class="crosshair" />}
+      {hud.hurt > 0.02 && <div class="hurt" style={{ opacity: Math.min(0.8, hud.hurt) }} />}
+
+      {!hud.driving && hud.aim < 0.7 && hud.life === 0 && (
+        <div class="crosshair-wrap">
+          <div class="crosshair" />
+          {hud.isGun && (
+            <div
+              class="spread"
+              style={{ width: `${8 + hud.spread * 900}px`, height: `${8 + hud.spread * 900}px` }}
+            />
+          )}
+        </div>
+      )}
+      {hud.hitMarker > 0 && <div class={hud.hitKill ? 'hitmarker kill' : 'hitmarker'}>✕</div>}
+
+      {hud.weapon && hud.life === 0 && !hud.driving && (
+        <div class="ammo" data-testid="ammo">
+          <span class="weapon-name">{hud.weapon}</span>
+          {hud.isGun && (
+            <span class="rounds">
+              {hud.reloading ? 'Reloading…' : `${hud.mag}`}
+              <small> / {hud.reserve}</small>
+            </span>
+          )}
+        </div>
+      )}
+
+      {hud.slots.length > 0 && hud.life === 0 && (
+        <div class="hotbar" data-testid="hotbar">
+          {hud.slots.map((id, i) => (
+            <div key={i} class={i === hud.selected ? 'slot selected' : 'slot'}>
+              <span class="key">{i + 1}</span>
+              <span class="item">{SHORT[id] ?? ''}</span>
+              {id === 'dynamite' && <span class="count">{hud.dynamite}</span>}
+              {id === 'holywater' && <span class="count">{hud.holywater}</span>}
+            </div>
+          ))}
+          <div class="meds" title="Q to use meds">
+            ✚ {hud.bandage} · ⚗ {hud.tonic} · ${hud.cash}
+          </div>
+        </div>
+      )}
+
+      {hud.life === 1 && (
+        <div class="downed" data-testid="downed">
+          <b>You are down</b>
+          <span>Bleeding out in {Math.ceil(hud.bleed)}s</span>
+          {hud.revive > 0 && (
+            <div class="bar revive">
+              <div style={{ width: `${hud.revive * 100}%` }} />
+            </div>
+          )}
+        </div>
+      )}
+      {hud.life === 2 && !hud.over && (
+        <div class="downed dead" data-testid="dead">
+          <b>You bled out</b>
+          <span>
+            You'll climb back aboard at the next station
+            {hud.respawnKm ? ` (km ${hud.respawnKm})` : ''}.
+          </span>
+        </div>
+      )}
+      {hud.over && (
+        <div class="over" data-testid="run-over">
+          <h2>The dead have the train</h2>
+          <p>Your party made it to km {Math.min(80, hud.km).toFixed(1)}.</p>
+        </div>
+      )}
 
       {hud.prompt && (
         <div class="prompt" data-testid="prompt">

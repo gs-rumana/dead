@@ -230,6 +230,128 @@ export class AudioEngine {
     this.whistleGain = null;
   }
 
+  /** A panner at a render-space position for one-shot 3D sounds. */
+  private at(x: number, y: number, z: number, ref = 4): AudioNode {
+    const p = this.ctx.createPanner();
+    p.panningModel = 'equalpower';
+    p.distanceModel = 'inverse';
+    p.refDistance = ref;
+    p.rolloffFactor = 1;
+    if (p.positionX) {
+      p.positionX.value = x;
+      p.positionY.value = y;
+      p.positionZ.value = z;
+    } else p.setPosition(x, y, z);
+    p.connect(this.effects);
+    setTimeout(() => p.disconnect(), 3000);
+    return p;
+  }
+
+  /** Gunshot: a sharp crack plus a low boom; louder for shotguns and rifles. */
+  gunshot(weapon: string, pos?: { x: number; y: number; z: number }): void {
+    const dest = pos ? this.at(pos.x, pos.y, pos.z, 10) : this.effects;
+    const heavy = weapon === 'coachgun' ? 1.3 : weapon === 'rifle' ? 1.15 : 1;
+    this.burst(dest, { freq: 2600, q: 0.6, attack: 0.001, decay: 0.09, gain: 0.55 * heavy });
+    this.burst(dest, {
+      freq: 160,
+      q: 0.8,
+      attack: 0.002,
+      decay: 0.32 * heavy,
+      gain: 0.8 * heavy,
+      type: 'lowpass',
+    });
+    // Echo off the landscape.
+    setTimeout(
+      () =>
+        this.burst(dest, {
+          freq: 500,
+          q: 0.5,
+          attack: 0.02,
+          decay: 0.5,
+          gain: 0.08 * heavy,
+          type: 'lowpass',
+        }),
+      140,
+    );
+  }
+
+  dryFire(): void {
+    this.burst(this.effects, { freq: 4200, q: 6, attack: 0.001, decay: 0.03, gain: 0.25 });
+  }
+
+  reloadClick(): void {
+    this.burst(this.effects, { freq: 3200, q: 5, attack: 0.001, decay: 0.04, gain: 0.2 });
+  }
+
+  swing(): void {
+    this.burst(this.effects, { freq: 900, q: 0.7, attack: 0.04, decay: 0.18, gain: 0.25 });
+  }
+
+  /** Bullet into flesh; headshots get a wet crack. */
+  hitFlesh(head: boolean, pos?: { x: number; y: number; z: number }): void {
+    const dest = pos ? this.at(pos.x, pos.y, pos.z, 6) : this.effects;
+    this.burst(dest, { freq: 240, q: 1.2, attack: 0.002, decay: 0.12, gain: 0.5, type: 'lowpass' });
+    if (head) this.burst(dest, { freq: 1600, q: 2, attack: 0.001, decay: 0.08, gain: 0.35 });
+  }
+
+  /** Hit confirmation tick for the shooter. */
+  hitTick(kill: boolean): void {
+    this.burst(this.effects, {
+      freq: kill ? 2200 : 3400,
+      q: 8,
+      attack: 0.001,
+      decay: kill ? 0.12 : 0.05,
+      gain: kill ? 0.3 : 0.18,
+    });
+  }
+
+  explosion(pos: { x: number; y: number; z: number }): void {
+    const dest = this.at(pos.x, pos.y, pos.z, 18);
+    this.burst(dest, { freq: 90, q: 0.5, attack: 0.005, decay: 1.4, gain: 1.4, type: 'lowpass' });
+    this.burst(dest, { freq: 900, q: 0.4, attack: 0.002, decay: 0.5, gain: 0.6 });
+  }
+
+  /** An undead moan: band-passed noise sweeping through vowel-like formants. */
+  groan(pos: { x: number; y: number; z: number }, pitch = 1): void {
+    const c = this.ctx;
+    const t = c.currentTime;
+    const dest = this.at(pos.x, pos.y, pos.z, 5);
+    const src = c.createBufferSource();
+    src.buffer = this.noise;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.35, t + 0.15);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 1.2);
+    const f1 = c.createBiquadFilter();
+    f1.type = 'bandpass';
+    f1.Q.value = 9;
+    f1.frequency.setValueAtTime(420 * pitch, t);
+    f1.frequency.linearRampToValueAtTime(260 * pitch, t + 1.1);
+    const osc = c.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(85 * pitch, t);
+    osc.frequency.linearRampToValueAtTime(65 * pitch, t + 1.1);
+    const og = c.createGain();
+    og.gain.value = 0.25;
+    osc.connect(og).connect(f1);
+    src.connect(f1).connect(g).connect(dest);
+    src.start(t, Math.random() * 0.5);
+    osc.start(t);
+    src.stop(t + 1.3);
+    osc.stop(t + 1.3);
+  }
+
+  hurt(): void {
+    this.burst(this.effects, {
+      freq: 200,
+      q: 1,
+      attack: 0.005,
+      decay: 0.2,
+      gain: 0.5,
+      type: 'lowpass',
+    });
+  }
+
   /** UI click / pickup tick. */
   tick(): void {
     this.burst(this.effects, { freq: 3000, q: 3, attack: 0.001, decay: 0.03, gain: 0.15 });
