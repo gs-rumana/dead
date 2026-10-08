@@ -12,6 +12,9 @@ export class AudioEngine {
   private readonly locoBus: GainNode;
   private readonly wind: GainNode;
   private readonly windFilter: BiquadFilterNode;
+  private readonly rain: GainNode;
+  /** Wind floor from the weather (0..1). */
+  private weatherWind = 0;
   private whistleOsc: OscillatorNode[] = [];
   private whistleGain: GainNode | null = null;
 
@@ -53,6 +56,124 @@ export class AudioEngine {
     this.wind.gain.value = 0;
     src.connect(this.windFilter).connect(this.wind).connect(this.effects);
     src.start();
+
+    // Rain: bright hiss on its own loop.
+    const rs = this.ctx.createBufferSource();
+    rs.buffer = this.noise;
+    rs.loop = true;
+    rs.playbackRate.value = 0.93;
+    const hp = this.ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 900;
+    const lp = this.ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 7000;
+    this.rain = this.ctx.createGain();
+    this.rain.gain.value = 0;
+    rs.connect(hp).connect(lp).connect(this.rain).connect(this.effects);
+    rs.start();
+  }
+
+  /** Weather ambience (§4.5): rain hiss and a wind floor, both 0..1. */
+  setWeather(rain: number, wind: number): void {
+    const t = this.ctx.currentTime;
+    this.rain.gain.setTargetAtTime(rain * 0.16, t, 1.5);
+    this.weatherWind = wind;
+  }
+
+  /** Thunder after a lightning flash; closer strikes crack before they rumble. */
+  thunder(delayS: number, near: number): void {
+    const c = this.ctx;
+    const t = c.currentTime + delayS;
+    const rumble = (freq: number, decay: number, gain: number, at: number) => {
+      const src = c.createBufferSource();
+      src.buffer = this.noise;
+      src.loop = true;
+      const f = c.createBiquadFilter();
+      f.type = 'lowpass';
+      f.frequency.value = freq;
+      const g = c.createGain();
+      g.gain.setValueAtTime(0.0001, at);
+      g.gain.exponentialRampToValueAtTime(gain, at + 0.08);
+      g.gain.exponentialRampToValueAtTime(0.0001, at + decay);
+      src.connect(f).connect(g).connect(this.effects);
+      src.start(at);
+      src.stop(at + decay + 0.1);
+    };
+    if (near > 0.6) rumble(2500, 0.35, 0.5 * near, t);
+    rumble(110, 3.2, 0.9 * (0.4 + near * 0.6), t + 0.05);
+    rumble(60, 4.5, 0.5, t + 0.4);
+  }
+
+  /** A werewolf's howl or a boss's roar: a rising, wavering voice. */
+  howl(pos: { x: number; y: number; z: number }, low = false): void {
+    const c = this.ctx;
+    const t = c.currentTime;
+    const dest = this.at(pos.x, pos.y, pos.z, 12);
+    const osc = c.createOscillator();
+    osc.type = low ? 'sawtooth' : 'triangle';
+    const base = low ? 70 : 380;
+    osc.frequency.setValueAtTime(base, t);
+    osc.frequency.linearRampToValueAtTime(base * 1.6, t + 0.6);
+    osc.frequency.linearRampToValueAtTime(base * 1.45, t + 1.6);
+    osc.frequency.linearRampToValueAtTime(base * 0.9, t + 2.2);
+    const lfo = c.createOscillator();
+    lfo.frequency.value = 5.5;
+    const lg = c.createGain();
+    lg.gain.value = base * 0.03;
+    lfo.connect(lg).connect(osc.frequency);
+    const f = c.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.value = low ? 300 : 900;
+    f.Q.value = 1.5;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(low ? 0.6 : 0.35, t + 0.3);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 2.3);
+    osc.connect(f).connect(g).connect(dest);
+    osc.start(t);
+    lfo.start(t);
+    osc.stop(t + 2.4);
+    lfo.stop(t + 2.4);
+  }
+
+  /** A vampire vanishing: a fast airy whoosh. */
+  blink(pos: { x: number; y: number; z: number }): void {
+    const c = this.ctx;
+    const t = c.currentTime;
+    const dest = this.at(pos.x, pos.y, pos.z, 6);
+    const src = c.createBufferSource();
+    src.buffer = this.noise;
+    const f = c.createBiquadFilter();
+    f.type = 'bandpass';
+    f.Q.value = 2;
+    f.frequency.setValueAtTime(400, t);
+    f.frequency.exponentialRampToValueAtTime(3500, t + 0.25);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.4, t + 0.05);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+    src.connect(f).connect(g).connect(dest);
+    src.start(t, Math.random() * 0.5);
+    src.stop(t + 0.4);
+  }
+
+  /** Dr. Voss's arc: a buzzing electric crack. */
+  zap(pos: { x: number; y: number; z: number }): void {
+    const c = this.ctx;
+    const t = c.currentTime;
+    const dest = this.at(pos.x, pos.y, pos.z, 10);
+    const osc = c.createOscillator();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(120, t);
+    osc.frequency.linearRampToValueAtTime(60, t + 0.3);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.25, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.35);
+    osc.connect(g).connect(dest);
+    osc.start(t);
+    osc.stop(t + 0.4);
+    this.burst(dest, { freq: 4000, q: 1, attack: 0.001, decay: 0.25, gain: 0.5 });
   }
 
   get running(): boolean {
@@ -101,8 +222,9 @@ export class AudioEngine {
   /** Wind level from the listener's speed through the air (m/s). */
   setWind(speed: number): void {
     const t = this.ctx.currentTime;
-    this.wind.gain.setTargetAtTime(Math.min(0.12, 0.012 + speed * 0.005), t, 0.3);
-    this.windFilter.frequency.setTargetAtTime(250 + speed * 40, t, 0.3);
+    const w = this.weatherWind;
+    this.wind.gain.setTargetAtTime(Math.min(0.14, 0.012 + speed * 0.005 + w * 0.09), t, 0.3);
+    this.windFilter.frequency.setTargetAtTime(250 + speed * 40 + w * 250, t, 0.3);
   }
 
   private burst(

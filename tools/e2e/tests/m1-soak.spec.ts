@@ -57,8 +57,12 @@ test('drive 20 km on a throttled mobile profile', async ({ page }) => {
   }> = [];
   const target = 20_000;
   const start = Date.now();
+  // Cycle the weather on the way (M6): rain, storm, dust and fog particles count too.
+  const weathers = [1, 2, 4, 3, 0];
+  let n = 0;
   while (Date.now() - start < 12 * 60_000) {
     await page.waitForTimeout(2000);
+    if (n++ % 20 === 0) await dev(page, 'weather', weathers[(n / 20) % weathers.length | 0]!);
     const r = await page.evaluate(() => {
       const d = (window as unknown as Win).__dt;
       const p = d.game.debug.perf;

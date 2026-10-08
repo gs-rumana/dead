@@ -45,7 +45,13 @@ export type PieceKind =
   | 'ladder'
   | 'sign'
   | 'fire'
-  | 'tent';
+  | 'tent'
+  | 'palisade'
+  | 'tower'
+  | 'gate'
+  | 'lever'
+  | 'brazier'
+  | 'rockwall';
 
 export interface Piece {
   id: number;
@@ -77,9 +83,24 @@ export interface ItemSpawn {
   ry: number;
 }
 
+/** A landmark raid's puzzle (§4.6): what opens the boss's door. */
+export interface LandmarkSpec {
+  kind: 'ranch' | 'mine' | 'chateau';
+  /** The locked door (a 'gate' piece). */
+  gate: number;
+  /** Levers to pull or braziers to light (all of them open the gate). */
+  triggers: number[];
+  /** The container hiding the cellar key (ranch). */
+  keyPiece: number;
+  boss: 'rancher' | 'voss' | 'countess';
+  /** Boss spawn point (structure-local). */
+  bossX: number;
+  bossZ: number;
+}
+
 export interface Structure {
   id: string;
-  kind: 'station' | 'homestead' | 'wagon' | 'town' | 'camp';
+  kind: 'station' | 'homestead' | 'wagon' | 'town' | 'camp' | 'fort' | 'landmark';
   name: string;
   /** World placement: origin and yaw (three.js yaw of the local -Z axis). */
   x: number;
@@ -91,6 +112,7 @@ export interface Structure {
   shop?: { piece: number; kind: ShopKind; stock: StockLine[] };
   /** Town index for town buildings. */
   town?: number;
+  landmark?: LandmarkSpec;
   /** Flat ground radius around the origin. */
   pad: number;
   /** Rough radius containing everything (for streaming). */
@@ -269,6 +291,20 @@ class Kit {
       swatch: 'woodGrayDark',
     });
     return { x0, x1, z0, z1, y: floorY };
+  }
+
+  /** A stone room on the ground with a locked iron gate in its front (-x) wall. Returns the gate. */
+  vault(cx: number, cz: number, hw: number, hd: number, h: number, swatch: string): number {
+    const x0 = cx - hw;
+    const x1 = cx + hw;
+    const z0 = cz - hd;
+    const z1 = cz + hd;
+    this.wall(x0, z1, x0, z0, 0, h, [{ at: hd, w: 1.4, bottom: 0, top: 2.3 }], swatch);
+    this.wall(x1, z0, x1, z1, 0, h, [], swatch);
+    this.wall(x0, z0, x1, z0, 0, h, [], swatch);
+    this.wall(x1, z1, x0, z1, 0, h, [], swatch);
+    this.add('roof', cx, h + 0.12, cz, hw + 0.3, 0.12, hd + 0.3, { swatch: 'rockDark' });
+    return this.add('gate', x0, 1.15, cz, 0.7, 1.15, 0.06, { ry: Math.PI / 2, swatch: 'iron' }).id;
   }
 }
 
@@ -897,4 +933,244 @@ export function planCamps(route: Route, features: Feature[]): number[] {
     s += rng.range(2800, 4200);
   }
   return out;
+}
+
+
+// ---------------------------------------------------------------------------
+// Forts (§4.4): Fort Ironwood (km 40) and Fort Haven (km 80) on the main line.
+// ---------------------------------------------------------------------------
+
+export const FORT_HALF_LENGTH = 38;
+export const FORT_HALF_WIDTH = 26;
+
+/**
+ * A palisade compound the track runs through. Gates sit where the track crosses
+ * the end walls. Inside: stores along one side. Fort Haven's far gate is closed
+ * and opens with a winch (the finale).
+ */
+export function buildFort(route: Route, f: Feature, fortIndex: number): Structure[] {
+  route.frameAt(f.s, tf);
+  const yaw = -tf.heading;
+  const st = { x: tf.x, y: tf.y, z: tf.z, yaw };
+  const k = new Kit();
+  const H = 4.2;
+  const L = FORT_HALF_LENGTH;
+  const W = FORT_HALF_WIDTH;
+  const wall = (x0: number, z0: number, x1: number, z1: number) => {
+    const len = Math.hypot(x1 - x0, z1 - z0);
+    const ry = Math.atan2(-(z1 - z0), x1 - x0);
+    k.add('palisade', (x0 + x1) / 2, H / 2 - 1.5, (z0 + z1) / 2, len / 2, H / 2 + 1.5, 0.25, {
+      ry,
+      swatch: 'woodDark',
+    });
+  };
+  // Side walls (parallel to the track).
+  wall(-W, -L, -W, L);
+  wall(W, -L, W, L);
+  // End walls with a 6 m gap for the track (local -z is the direction of travel).
+  for (const z of [-L, L]) {
+    wall(-W, z, -3.2, z);
+    wall(3.2, z, W, z);
+  }
+  // Corner towers.
+  for (const [x, z] of [[-W, -L], [W, -L], [-W, L], [W, L]] as const) {
+    k.add('tower', x, 3.4 - 1.5, z, 1.6, 3.4 + 1.5, 1.6, { swatch: 'woodGrayDark' });
+  }
+  const haven = fortIndex === 1;
+  let gate = -1;
+  let lever = -1;
+  if (haven) {
+    // The far gate is shut across the track; a winch house beside it opens it.
+    gate = k.add('gate', 0, H / 2, -L, 3.2, H / 2, 0.3, { swatch: 'iron' }).id;
+    lever = k.add('lever', 5.5, 1.1, -L + 3, 0.4, 1.1, 0.4, { swatch: 'iron', solid: true }).id;
+  }
+  // Platforms on both sides of the track for unloading.
+  for (const side of [-1, 1]) k.add('platform', side * 4.5, PLATFORM_TOP - 0.75, 0, 1.6, 0.75, 22, { swatch: 'woodGray' });
+  const out: Structure[] = [];
+  const name = f.name;
+  out.push({
+    id: `f${fortIndex}`,
+    kind: 'fort',
+    name,
+    ...st,
+    pieces: k.pieces,
+    spawns: [],
+    pad: 0,
+    radius: L + 6,
+    wood: 'woodDark',
+    feature: f,
+    ...(haven ? { gatePiece: gate, leverPiece: lever } : {}),
+  } as Structure);
+  // Stores along the right side inside the walls.
+  const rng = new Rng(hashInts(route.seed, 0xf047, fortIndex));
+  const roles = ['gunsmith', 'doctor', 'general', 'trading'] as const;
+  roles.forEach((role, i) => {
+    const lx = W - 9;
+    const lz = -L + 12 + i * 17;
+    const c = Math.cos(yaw);
+    const sn = Math.sin(yaw);
+    const x = st.x + c * lx + sn * lz;
+    const z = st.z - sn * lx + c * lz;
+    // Face the track (local -x).
+    const b = buildTownBuilding(route.seed, 100 + fortIndex, i, role, x, st.y, z, yaw, name, rng);
+    b.id = `f${fortIndex}b${i}`;
+    b.kind = 'fort';
+    out.push(b);
+  });
+  return out;
+}
+
+/** Fort Haven's gate and winch pieces (set by buildFort). */
+export function fortGate(st: Structure): { gate: number; lever: number } | null {
+  const s = st as Structure & { gatePiece?: number; leverPiece?: number };
+  return s.gatePiece !== undefined && s.gatePiece >= 0 ? { gate: s.gatePiece, lever: s.leverPiece ?? -1 } : null;
+}
+
+
+// ---------------------------------------------------------------------------
+// Landmarks (§4.6): a raid with a puzzle and a boss, one per biome.
+// ---------------------------------------------------------------------------
+
+/** Builds the landmark beside the line for feature f (index 0 ranch, 1 mine, 2 chateau). */
+export function buildLandmark(
+  route: Route,
+  f: Feature,
+  index: number,
+  groundY: (x: number, z: number) => number,
+): Structure {
+  route.frameAt(f.s, tf);
+  const side = f.side;
+  const lat = side * 64;
+  const x = tf.x + tf.rx * lat;
+  const z = tf.z + tf.rz * lat;
+  // Local -x faces the track.
+  const yaw = Math.atan2(-(tf.x - x), -(tf.z - z)) + Math.PI / 2;
+  const k = new Kit();
+  const rng = new Rng(hashInts(route.seed, 0x1a4d, index));
+  let spec: LandmarkSpec;
+  if (index === 0) {
+    // Grayson Ranch: the manor hides the cellar key; the Rancher waits below.
+    const house = k.cabin(0, -5, 11, 14, 0.35, {
+      door: 'front',
+      boards: true,
+      swatch: 'woodLight',
+      wallH: 3.4,
+    });
+    const containers = [
+      k.add('drawer', house.x0 + 0.5, 0.8, house.z0 + 1.0, 0.4, 0.45, 0.7, { loot: 'drawer', swatch: 'woodDark' }),
+      k.add('cabinet', house.x1 - 0.45, 1.25, house.z1 - 1.0, 0.35, 0.9, 0.6, { loot: 'cabinet', swatch: 'wood' }),
+      k.add('drawer', house.x1 - 0.5, 0.8, house.z0 + 1.2, 0.4, 0.45, 0.7, { loot: 'drawer', swatch: 'woodDark' }),
+      k.add('cabinet', house.x1 - 0.45, 1.25, -5, 0.35, 0.9, 0.6, { loot: 'cabinet', swatch: 'wood' }),
+      k.add('shelf', 0, 1.45, house.z0 + 0.35, 1.2, 1.1, 0.25, { loot: 'shelf', swatch: 'wood' }),
+    ].map((p) => p.id);
+    for (let i = 0; i < 4; i++)
+      k.spawns.push({
+        kind: rng.pick<ItemKind>(['chair', 'table', 'cabinet']),
+        x: rng.range(-3, 3),
+        y: 0.5,
+        z: rng.range(-10, 0),
+        ry: rng.range(0, 6),
+      });
+    // A red barn and a fenced yard.
+    k.cabin(1, -21, 9, 7, 0.2, { door: 'front', boards: false, swatch: 'locoRed', wallH: 3.6 });
+    for (let i = 0; i < 6; i++)
+      k.add('fence', -10, 0.55, -24 + i * 4.8, 0.06, 0.55, 2.4, { swatch: 'woodGray' });
+    k.add('well', -5, 0.5, 8, 0.7, 0.5, 0.7, { swatch: 'rock' });
+    // The cellar: a stone outbuilding with a locked iron door.
+    const gate = k.vault(8, 10, 2.6, 2.6, 2.6, 'rock');
+    for (let i = 0; i < 3; i++)
+      k.spawns.push({ kind: 'gold_bar', x: 9 + rng.range(-1.2, 1.2), y: 0.1, z: 10 + rng.range(-1.2, 1.2), ry: 0 });
+    k.spawns.push({ kind: 'strongbox', x: 9.4, y: 0, z: 11.4, ry: 0.5 });
+    spec = {
+      kind: 'ranch',
+      gate,
+      triggers: [],
+      keyPiece: containers[rng.int(0, containers.length - 1)]!,
+      boss: 'rancher',
+      bossX: 1,
+      bossZ: 10,
+    };
+  } else if (index === 1) {
+    // Copperhead Mine and Lab: three levers restore power to the vault.
+    k.add('rockwall', 18, 4.5, 0, 6, 5.5, 18, { swatch: 'rockRed' });
+    const gate = k.vault(10, 0, 2.5, 2.2, 2.8, 'rockRedDark');
+    // Timber frame around the adit.
+    for (const zz of [-1.1, 1.1])
+      k.add('post', 7.3, 1.3, zz, 0.14, 1.3, 0.14, { swatch: 'woodDark', solid: false });
+    k.add('post', 7.3, 2.65, 0, 0.16, 0.12, 1.3, { swatch: 'woodDark', solid: false });
+    // The headframe over the old shaft.
+    for (const [px, pz] of [[2, -13], [5, -13], [2, -10], [5, -10]] as const)
+      k.add('post', px, 3, pz, 0.15, 3, 0.15, { swatch: 'woodDark' });
+    k.add('roof', 3.5, 6.1, -11.5, 1.9, 0.12, 1.9, { swatch: 'woodGrayDark', solid: false });
+    const lab = k.cabin(-5, -10, 7, 8, 0.35, { door: 'front', boards: false, swatch: 'woodGray' });
+    k.add('safe', lab.x1 - 0.6, 0.85, lab.z0 + 0.8, 0.45, 0.5, 0.45, { loot: 'safe', swatch: 'ironLight' });
+    k.add('shelf', -5, 1.45, lab.z1 - 0.35, 1.2, 1.1, 0.25, { loot: 'shelf', swatch: 'woodGray' });
+    // A boiler shed for the generator.
+    k.add('tank', -6, 1.4, 10, 1.1, 1.4, 1.1, { swatch: 'rust' });
+    const triggers = [
+      k.add('lever', 6.4, 0.6, 3.2, 0.25, 0.6, 0.25, { swatch: 'iron' }).id,
+      k.add('lever', lab.x1 - 0.6, 0.95, -10 + 2.2, 0.25, 0.6, 0.25, { swatch: 'iron' }).id,
+      k.add('lever', -4.2, 0.6, 10, 0.25, 0.6, 0.25, { swatch: 'iron' }).id,
+    ];
+    for (let i = 0; i < 4; i++)
+      k.spawns.push({
+        kind: rng.pick<ItemKind>(['gold_nugget', 'gold_nugget', 'gold_bar']),
+        x: 11 + rng.range(-1.2, 1.2),
+        y: 0.1,
+        z: rng.range(-1.2, 1.2),
+        ry: 0,
+      });
+    k.spawns.push({ kind: 'crate', x: 3, y: 0, z: 6, ry: 0.4 });
+    k.spawns.push({ kind: 'lumber', x: 1, y: 0, z: -4, ry: 1.0 });
+    spec = { kind: 'mine', gate, triggers, keyPiece: -1, boss: 'voss', bossX: 3, bossZ: 0 };
+  } else {
+    // Blackpine Chateau: light the three braziers to open the crypt.
+    const hall = k.cabin(0, 0, 12, 16, 0.35, {
+      door: 'front',
+      boards: true,
+      swatch: 'rockDark',
+      wallH: 4.2,
+    });
+    for (const zz of [-8.6, 8.6])
+      k.add('tower', -6.6, 3.2, zz, 1.3, 3.2, 1.3, { swatch: 'rockDark' });
+    k.add('cabinet', hall.x1 - 0.45, 1.25, hall.z1 - 1.0, 0.35, 0.9, 0.6, { loot: 'cabinet', swatch: 'woodDark' });
+    k.add('drawer', hall.x1 - 0.5, 0.8, hall.z0 + 1.0, 0.4, 0.45, 0.7, { loot: 'drawer', swatch: 'woodDark' });
+    k.add('shelf', 2, 1.45, hall.z0 + 0.35, 1.2, 1.1, 0.25, { loot: 'shelf', swatch: 'woodDark' });
+    const triggers = [
+      k.add('brazier', -10, 0.5, -6, 0.4, 0.5, 0.4, { swatch: 'iron' }).id,
+      k.add('brazier', -10, 0.5, 6, 0.4, 0.5, 0.4, { swatch: 'iron' }).id,
+      k.add('brazier', 12, 0.5, -8, 0.4, 0.5, 0.4, { swatch: 'iron' }).id,
+    ];
+    const gate = k.vault(14, 13, 2.4, 2.4, 2.6, 'rock');
+    // Headstones before the crypt.
+    for (let i = 0; i < 6; i++)
+      k.add('post', 6 + (i % 3) * 1.8, 0.45, 15 + Math.floor(i / 3) * 2.2, 0.3, 0.45, 0.08, { swatch: 'rock' });
+    for (let i = 0; i < 3; i++)
+      k.spawns.push({
+        kind: rng.pick<ItemKind>(['jewelry', 'gold_bar', 'silver_watch']),
+        x: 14.5 + rng.range(-1, 1),
+        y: 0.1,
+        z: 13 + rng.range(-1, 1),
+        ry: 0,
+      });
+    for (let i = 0; i < 3; i++)
+      k.spawns.push({ kind: 'chair', x: rng.range(-3, 3), y: 0.5, z: rng.range(-6, 6), ry: rng.range(0, 6) });
+    spec = { kind: 'chateau', gate, triggers, keyPiece: -1, boss: 'countess', bossX: 8, bossZ: 10 };
+  }
+  return {
+    id: `l${index}`,
+    kind: 'landmark',
+    name: f.name,
+    x,
+    y: groundY(x, z),
+    z,
+    yaw,
+    pieces: k.pieces,
+    spawns: k.spawns,
+    pad: 26,
+    radius: 30,
+    wood: 'wood',
+    feature: f,
+    landmark: spec,
+  };
 }

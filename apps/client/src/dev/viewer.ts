@@ -3,7 +3,7 @@ import { createRenderer } from '../render/createRenderer.ts';
 import { paletteMaterial, paletteSkinnedMaterial } from '../render/materials.ts';
 import { OUTFITS, createHumanoid } from '../render/models/humanoid.ts';
 import { PROP_KINDS, buildProp, buildTelegraphPole } from '../render/models/props.ts';
-import { ZOMBIE_OUTFITS } from '../render/models/humanoid.ts';
+import { MONSTER_OUTFITS, ZOMBIE_OUTFITS } from '../render/models/humanoid.ts';
 import { bakeVat, type ClipName } from '../render/vat.ts';
 import { createVatInstances } from '../render/vatMaterial.ts';
 import {
@@ -92,6 +92,19 @@ export async function runViewer(
         mantling: false,
         sprinting: i === 3,
       });
+      group.add(h.mesh);
+    });
+  }
+  if (which === 'monsters') {
+    // Night hunters and the three bosses, side by side at their own scale.
+    (['werewolf', 'vampire', 'rancher', 'voss', 'countess'] as const).forEach((type, i) => {
+      const o = MONSTER_OUTFITS[type];
+      const h = createHumanoid(o, paletteSkinnedMaterial());
+      const scale = type === 'rancher' ? 2 : type === 'voss' ? 1.15 : 1.1;
+      h.mesh.scale.setScalar(scale);
+      h.mesh.position.set((i - 2) * 1.6, -0.3, 0);
+      h.mesh.rotation.y = 0.35;
+      h.animate(0.2, { speed: 0, grounded: true, pitch: 0, driving: false, mantling: false, sprinting: false });
       group.add(h.mesh);
     });
   }

@@ -237,6 +237,17 @@ export class RunHost {
     ts.pressure = tr.pressure;
     ts.driver = tr.driver;
     state.night = sim.nightType;
+    state.checkpoint = sim.forts.checkpoint;
+    const cpt = Math.ceil(sim.forts.checkpointT);
+    if (state.checkpointT !== cpt) state.checkpointT = cpt;
+    state.finale = sim.forts.finale;
+    const wn = Math.round(sim.forts.winch * 100) / 100;
+    if (state.winch !== wn) state.winch = wn;
+    if (sim.forts.result && !state.result) state.result = JSON.stringify(sim.forts.result);
+    state.weatherFrom = sim.weather.from;
+    state.weatherTo = sim.weather.to;
+    const wb = Math.round(sim.weather.blend * 100) / 100;
+    if (state.weatherBlend !== wb) state.weatherBlend = wb;
     this.writeEnemies();
     this.writeItems();
     this.writeProjectiles();
@@ -316,7 +327,7 @@ export class RunHost {
       if (Math.abs(Math.atan2(Math.sin(e.yaw - es.yaw), Math.cos(e.yaw - es.yaw))) > 0.07)
         es.yaw = e.yaw;
       if (es.anim !== e.anim) es.anim = e.anim;
-      const hp = Math.max(0, Math.round((255 * e.hp) / e.def.hp));
+      const hp = Math.max(0, Math.round((255 * e.hp) / e.maxHp));
       if (es.hp !== hp) es.hp = hp;
       if (es.gore !== e.gore) es.gore = e.gore;
     }

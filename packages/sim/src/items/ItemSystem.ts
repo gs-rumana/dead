@@ -292,6 +292,13 @@ export class ItemSystem {
       case 'search':
         if (a && b && hold) this.search(p, a, Number(b));
         break;
+      case 'lever':
+      case 'brazier':
+        if (a && b) this.sim.landmarks.trigger(p, a, Number(b));
+        break;
+      case 'unlock':
+        if (a && b) this.sim.landmarks.unlock(p, a, Number(b));
+        break;
       case 'cargo':
         this.stow(p);
         break;
@@ -584,6 +591,12 @@ export class ItemSystem {
     const key = `${stId}:${pieceId}`;
     if (this.props.get(key)) return;
     this.props.set(key, 1);
+    if (this.sim.landmarks.isKeyPiece(stId, pieceId)) {
+      // Grayson Ranch: the cellar key (§4.6).
+      if (!this.pickupSmall(p, 'cellar_key'))
+        this.spawn('cellar_key', p.motor.frame, p.motor.x, p.motor.y + 0.2, p.motor.z, 0, { flying: true });
+      this.sim.broadcast('Someone found the cellar key!');
+    }
     this.giveLoot(
       p,
       f.piece.loot,
@@ -675,6 +688,7 @@ export class ItemSystem {
       const price = sellPrice(shop, kind);
       if (price <= 0) return 0;
       p.inv.pack.splice(i, 1);
+      if (kind === 'bounty') this.sim.forts.bounties++;
       return price;
     };
     let total = 0;

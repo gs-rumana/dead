@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { type Piece, type Structure, type World, doorPose } from '@dead-tracks/shared';
+import { type Piece, type Structure, type World, doorPose, fortGate, hashInts } from '@dead-tracks/shared';
 import { MeshBuilder } from '../render/builder.ts';
 import { glowMaterial, paletteMaterial, paletteSkinnedMaterial } from '../render/materials.ts';
 import { type Humanoid, OUTFITS, type Outfit, createHumanoid } from '../render/models/humanoid.ts';
@@ -12,6 +12,11 @@ interface Built {
   boards: Map<number, THREE.Mesh>;
   keeper: Humanoid | null;
   lamps: THREE.Mesh[];
+  /** Iron gates that lift when open (landmark vaults, Fort Haven). */
+  gates: Map<number, { mesh: THREE.Mesh; lift: number; y: number; h: number }>;
+  /** Lever handles (rotate when pulled) and brazier flames (shown when lit). */
+  levers: Map<number, { mesh: THREE.Mesh; t: number }>;
+  flames: Map<number, THREE.Mesh>;
 }
 
 const KEEPER: Outfit = { ...OUTFITS[2]!, vest: 'shirtRed', hat: undefined };
@@ -36,6 +41,8 @@ export class StructureView {
     range: number,
     props: (key: string) => number,
     night: number,
+    finale = 0,
+    winch = 0,
   ): void {
     const want = new Set<string>();
     for (const st of this.world.structuresNear(camX, camZ, range)) {
@@ -62,6 +69,22 @@ export class StructureView {
         }
       }
       for (const [pid, mesh] of b.boards) mesh.visible = !props(`${id}:${pid}`);
+      // Fort Haven's gate rises with the winch; vault doors lift once opened.
+      const fg = fortGate(b.st);
+      for (const [pid, g] of b.gates) {
+        const target = fg?.gate === pid ? Math.max(props(`${id}:${pid}`), winch * 0.85) : props(`${id}:${pid}`);
+        g.lift += Math.sign(target - g.lift) * Math.min(Math.abs(target - g.lift), dt * 0.8);
+        g.mesh.position.y = g.y + g.lift * (g.h + 0.1);
+      }
+      for (const [pid, l] of b.levers) {
+        const on = fg?.lever === pid ? finale >= 1 : props(`${id}:${pid}`) === 1;
+        l.t += Math.sign((on ? 1 : 0) - l.t) * Math.min(Math.abs((on ? 1 : 0) - l.t), dt * 3);
+        l.mesh.rotation.z = -0.7 + l.t * 1.4;
+      }
+      for (const [pid, f] of b.flames) {
+        f.visible = props(`${id}:${pid}`) === 1;
+        if (f.visible) f.scale.y = 1 + Math.sin(performance.now() / 90 + pid) * 0.15;
+      }
       b.keeper?.animate(dt, {
         speed: 0,
         grounded: true,
@@ -94,6 +117,9 @@ export class StructureView {
     const doors = new Map<number, { mesh: THREE.Mesh; open: number; target: number }>();
     const boards = new Map<number, THREE.Mesh>();
     const lamps: THREE.Mesh[] = [];
+    const gates: Built['gates'] = new Map();
+    const levers: Built['levers'] = new Map();
+    const flames: Built['flames'] = new Map();
     const mat = paletteMaterial();
     for (const p of st.pieces) {
       const sw = (p.swatch ?? 'wood') as Swatch;
@@ -120,6 +146,129 @@ export class StructureView {
           mesh.rotation.y = p.ry;
           group.add(mesh);
           boards.set(p.id, mesh);
+          break;
+        }
+        case 'gate': {
+          // Iron bars in a frame; the whole gate lifts out of the way.
+          const gb = new MeshBuilder();
+          const w = p.hx * 2;
+          const h = p.hy * 2;
+          const n = Math.max(3, Math.round(w / 0.22));
+          for (let i = 0; i <= n; i++)
+            gb.box(sw, -p.hx + (i / n) * w, 0, 0, 0.05, h, 0.05);
+          for (const y of [-0.45, 0, 0.45]) gb.box(sw, 0, y * h, 0, w, 0.08, p.hz * 2 + 0.04);
+          const mesh = new THREE.Mesh(gb.build(), mat);
+          mesh.castShadow = true;
+          mesh.position.set(p.x, p.y, p.z);
+          mesh.rotation.y = p.ry;
+          group.add(mesh);
+          gates.set(p.id, { mesh, lift: 0, y: p.y, h });
+          break;
+        }
+        case 'lever': {
+          // A post-mounted box with a throw handle.
+          b.box('woodDark', p.x, p.y - p.hy * 0.4, p.z, 0.16, p.hy * 1.2, 0.16);
+          b.box(sw, p.x, p.y + p.hy * 0.25, p.z, 0.32, 0.28, 0.22);
+          const hb = new MeshBuilder();
+          hb.box('iron', 0, 0.3, 0, 0.05, 0.6, 0.05);
+          hb.box('signRed', 0, 0.62, 0, 0.09, 0.1, 0.09);
+          const mesh = new THREE.Mesh(hb.build(), mat);
+          mesh.position.set(p.x, p.y + p.hy * 0.3, p.z);
+          mesh.rotation.y = p.ry;
+          mesh.rotation.z = -0.7;
+          group.add(mesh);
+          levers.set(p.id, { mesh, t: 0 });
+          break;
+        }
+        case 'brazier': {
+          // Iron bowl on three legs; fire when lit.
+          for (let i = 0; i < 3; i++) {
+            const a = (i / 3) * Math.PI * 2;
+            b.box(sw, p.x + Math.cos(a) * 0.22, p.y - 0.2, p.z + Math.sin(a) * 0.22, 0.05, p.hy * 1.4, 0.05, {
+              rz: Math.cos(a) * 0.2,
+              rx: -Math.sin(a) * 0.2,
+            });
+          }
+          b.cylinder(sw, p.x, p.y + p.hy * 0.55, p.z, p.hx, p.hx * 0.6, 0.25, 8);
+          b.cylinder('coal', p.x, p.y + p.hy * 0.55 + 0.11, p.z, p.hx * 0.85, p.hx * 0.85, 0.04, 8);
+          const flame = new THREE.Mesh(new THREE.ConeGeometry(p.hx * 0.7, 0.9, 6), glowMaterial(0xff8a2a));
+          flame.position.set(p.x, p.y + p.hy * 0.55 + 0.5, p.z);
+          flame.visible = false;
+          group.add(flame);
+          flames.set(p.id, flame);
+          break;
+        }
+        case 'fence': {
+          // Posts and two rails along the piece's long axis.
+          b.push(p.x, p.y, p.z, { ry: p.ry });
+          const along = p.hz > p.hx;
+          const len = (along ? p.hz : p.hx) * 2;
+          const n = Math.max(1, Math.round(len / 2.4));
+          for (let i = 0; i <= n; i++) {
+            const t = -len / 2 + (i / n) * len;
+            b.box('woodDark', along ? 0 : t, 0, along ? t : 0, 0.1, p.hy * 2, 0.1);
+          }
+          for (const y of [-0.1, 0.3])
+            b.box(sw, 0, y * p.hy * 2, 0, along ? 0.05 : len, 0.09, along ? len : 0.05);
+          b.pop();
+          break;
+        }
+        case 'rockwall': {
+          // A mesa face: a tapered block with boulders along the top and foot.
+          b.push(p.x, p.y, p.z, { ry: p.ry });
+          b.prism(
+            sw,
+            [
+              [-p.hx, -p.hy],
+              [p.hx, -p.hy],
+              [p.hx * 0.75, p.hy],
+              [-p.hx * 0.55, p.hy * 0.88],
+            ],
+            p.hz * 2,
+          );
+          b.pop();
+          const n = Math.max(4, Math.round((p.hx + p.hz) / 1.5));
+          for (let i = 0; i < n; i++) {
+            const h = hashInts(p.id, i, 77);
+            const fx = ((h & 0xff) / 255) * 2 - 1;
+            const fz = (((h >>> 8) & 0xff) / 255) * 2 - 1;
+            const r = 0.8 + (((h >>> 16) & 0xff) / 255) * Math.min(p.hx, p.hz) * 0.5;
+            const top = i % 3 !== 0;
+            b.blob(
+              i % 2 ? sw : sw === 'rockRed' ? 'rockRedDark' : 'rockDark',
+              p.x + fx * p.hx * (top ? 0.6 : 1),
+              top ? p.y + p.hy * 0.85 : p.y - p.hy + r * 0.5,
+              p.z + fz * p.hz * 0.95,
+              r * 1.3,
+              r * (top ? 0.8 : 1),
+              r * 1.2,
+            );
+          }
+          break;
+        }
+        case 'palisade': {
+          // Sharpened logs.
+          b.push(p.x, p.y, p.z, { ry: p.ry });
+          const n = Math.max(2, Math.round((p.hx * 2) / 0.5));
+          for (let i = 0; i < n; i++) {
+            const x = -p.hx + ((i + 0.5) / n) * p.hx * 2;
+            const h = p.hy * 2 - ((i * 7) % 3) * 0.15;
+            b.cylinder(i % 3 ? sw : 'bark', x, -p.hy + h / 2, 0, 0.24, 0.24, h, 5);
+            b.cone(sw, x, -p.hy + h + 0.22, 0, 0.24, 0.45, 5);
+          }
+          b.box('woodGrayDark', 0, p.hy - 1.4, -0.28, p.hx * 2, 0.16, 0.08);
+          b.pop();
+          break;
+        }
+        case 'tower': {
+          // Watchtower: legs, a boarded lookout and a pyramid roof.
+          const top = p.y + p.hy;
+          for (const sx of [-1, 1])
+            for (const sz of [-1, 1])
+              b.box('woodDark', p.x + sx * p.hx * 0.85, p.y, p.z + sz * p.hz * 0.85, 0.2, p.hy * 2, 0.2);
+          b.box(sw, p.x, top - 1.6, p.z, p.hx * 2, 1.2, p.hz * 2);
+          b.box('woodGray', p.x, top - 2.25, p.z, p.hx * 2.1, 0.12, p.hz * 2.1);
+          b.cone('woodGrayDark', p.x, top + 0.55, p.z, Math.max(p.hx, p.hz) * 1.45, 1.4, 4, { ry: Math.PI / 4 });
           break;
         }
         case 'gable': {
@@ -289,7 +438,7 @@ export class StructureView {
       group.add(keeper.mesh);
     }
     this.worldRoot.add(group);
-    return { st, group, doors, boards, keeper, lamps };
+    return { st, group, doors, boards, keeper, lamps, gates, levers, flames };
   }
 
   get count(): number {

@@ -12,7 +12,7 @@ import {
   trainToWorld,
   trainYawAt,
 } from '@dead-tracks/shared';
-import { OUTLAW_OUTFIT, ZOMBIE_OUTFITS } from '../render/models/humanoid.ts';
+import { MONSTER_OUTFITS, OUTLAW_OUTFIT, ZOMBIE_OUTFITS } from '../render/models/humanoid.ts';
 import { type ClipName, type VatAsset, bakeVat } from '../render/vat.ts';
 import { type VatInstances, createVatInstances } from '../render/vatMaterial.ts';
 import { INTERP_DELAY } from './RemotePlayers.ts';
@@ -60,17 +60,37 @@ const ANIM_CLIP: Record<number, ClipName> = {
   [Anim.Crouch]: 'crouch',
 };
 
-/** Which baked body each enemy type uses until its own art lands. */
-type Body = 'walker' | 'runner' | 'brute' | 'outlaw';
+/** Each enemy type has its own baked body. */
+type Body = EnemyType;
 
-const BODY: Record<EnemyType, Body> = {
-  walker: 'walker',
-  runner: 'runner',
-  brute: 'brute',
-  outlaw: 'outlaw',
-  werewolf: 'runner',
-  vampire: 'runner',
+/** Instances per body (one draw call each while any are visible). */
+const CAPACITY: Record<Body, number> = {
+  walker: 96,
+  runner: 96,
+  brute: 96,
+  outlaw: 24,
+  werewolf: 24,
+  vampire: 24,
+  rancher: 2,
+  voss: 2,
+  countess: 2,
 };
+
+function bake(body: Body): VatAsset {
+  switch (body) {
+    case 'walker':
+    case 'runner':
+    case 'brute':
+      return bakeVat(ZOMBIE_OUTFITS[body]);
+    case 'outlaw':
+      return bakeVat(OUTLAW_OUTFIT, 'human', 'rifle');
+    case 'werewolf':
+    case 'rancher':
+      return bakeVat(MONSTER_OUTFITS[body]);
+    default:
+      return bakeVat(MONSTER_OUTFITS[body], 'human');
+  }
+}
 
 /**
  * Renders the visible enemies (§6.9 hordes) with snapshot interpolation, driving
@@ -80,20 +100,29 @@ export class EnemyView {
   private readonly enemies = new Map<string, Rendered>();
   private readonly bodies = new Map<Body, { asset: VatAsset; inst: VatInstances }>();
   private readonly w = { x: 0, y: 0, z: 0 };
+  private readonly timers: ReturnType<typeof setTimeout>[] = [];
 
   constructor(
     private readonly scene: THREE.Scene,
     private readonly terrain: Terrain,
   ) {
-    for (const body of ['walker', 'runner', 'brute', 'outlaw'] as const) {
-      const asset =
-        body === 'outlaw'
-          ? bakeVat(OUTLAW_OUTFIT, 'human', 'rifle')
-          : bakeVat(ZOMBIE_OUTFITS[body]);
-      const inst = createVatInstances(asset, body === 'outlaw' ? 24 : 96);
-      scene.add(inst.mesh);
-      this.bodies.set(body, { asset, inst });
+    for (const body of ['walker', 'runner', 'brute', 'outlaw'] as const) this.body(body);
+    // The rarer bodies bake in the background so the first werewolf doesn't hitch.
+    (['werewolf', 'vampire', 'rancher', 'voss', 'countess'] as const).forEach((b, i) =>
+      this.timers.push(setTimeout(() => this.body(b), 1500 + i * 400)),
+    );
+  }
+
+  private body(body: Body): { asset: VatAsset; inst: VatInstances } {
+    let b = this.bodies.get(body);
+    if (!b) {
+      const asset = bake(body);
+      const inst = createVatInstances(asset, CAPACITY[body]);
+      inst.mesh.visible = false;
+      this.scene.add(inst.mesh);
+      this.bodies.set(body, (b = { asset, inst }));
     }
+    return b;
   }
 
   sample(state: RunState, now: number): void {
@@ -166,6 +195,12 @@ export class EnemyView {
     for (const r of this.enemies.values()) cb(r.id, r.type, r.wx, r.wy, r.wz, r.dead);
   }
 
+  /** Rendered world position of one enemy, if visible. */
+  position(id: string): { x: number; y: number; z: number } | null {
+    const r = this.enemies.get(id);
+    return r && r.buf.length ? { x: r.wx, y: r.wy, z: r.wz } : null;
+  }
+
   get count(): number {
     return this.enemies.size;
   }
@@ -226,11 +261,10 @@ export class EnemyView {
       else if (clip === 'run') r.phase += (r.speed * dt) / 2.4;
       r.flash = Math.max(0, r.flash - dt * 6);
 
-      const body = this.bodies.get(BODY[r.type]);
-      if (!body) continue;
-      const i = counts.get(BODY[r.type]) ?? 0;
+      const body = this.body(r.type);
+      const i = counts.get(r.type) ?? 0;
       if (i >= body.inst.capacity) continue;
-      counts.set(BODY[r.type], i + 1);
+      counts.set(r.type, i + 1);
       const c = body.asset.clips[clip];
       let f: number;
       if (clip === 'walk' || clip === 'run') f = (((r.phase % 1) + 1) % 1) * c.frames;
@@ -254,6 +288,7 @@ export class EnemyView {
   }
 
   dispose(): void {
+    for (const t of this.timers) clearTimeout(t);
     for (const b of this.bodies.values()) this.scene.remove(b.inst.mesh);
   }
 }

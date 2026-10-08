@@ -114,7 +114,17 @@ export const TrainState = schema(
 export type TrainState = SchemaType<typeof TrainState>;
 
 /** Enemy kinds on the wire (index into ENEMY_TYPES). */
-export const ENEMY_TYPES = ['walker', 'runner', 'brute', 'outlaw', 'werewolf', 'vampire'] as const;
+export const ENEMY_TYPES = [
+  'walker',
+  'runner',
+  'brute',
+  'outlaw',
+  'werewolf',
+  'vampire',
+  'rancher',
+  'voss',
+  'countess',
+] as const;
 
 /** Enemy animation states. */
 export const Anim = {
@@ -230,6 +240,18 @@ export const RunState = schema(
     projectiles: t.map(ProjectileState),
     /** Night type for this cycle (§4.5): 0 clear, 1 full moon, 2 blood moon, 3 storm, 4 fog. */
     night: t.uint8(),
+    /** Weather blending from → to (§4.5). */
+    weatherFrom: t.uint8(),
+    weatherTo: t.uint8(),
+    weatherBlend: t.float32(),
+    /** Fort Ironwood checkpoint (0 idle, 1 active, 2 done) and seconds left. */
+    checkpoint: t.uint8(),
+    checkpointT: t.float32(),
+    /** Fort Haven finale (0 closed, 1 winching, 2 open, 3 won) and winch progress. */
+    finale: t.uint8(),
+    winch: t.float32(),
+    /** Set when the run ends (§4.1 results). */
+    result: t.string(),
   },
   'RunState',
 );

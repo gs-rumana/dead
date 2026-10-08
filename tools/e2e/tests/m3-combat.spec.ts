@@ -83,7 +83,9 @@ test('shoot walkers: hits register, heads pop, iron sights render', async ({ pag
           (window as unknown as { __kills: number }).__kills++;
     });
   });
-  // Headshots with the revolver until they're down.
+  // Aimed headshots with the revolver until they're down (hip fire spreads ~0.7 m at 20 m).
+  await page.evaluate(() => (window as unknown as { __dt: Dbg }).__dt.game.setAim(true));
+  await page.waitForTimeout(400);
   let kills = 0;
   for (let i = 0; i < 12 && kills < 3; i++) {
     const id = await page.evaluate(() =>

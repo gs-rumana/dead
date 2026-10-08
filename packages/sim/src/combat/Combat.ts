@@ -363,7 +363,8 @@ export class Combat {
       if (e.state === 'dead') continue;
       const d = Math.hypot(e.wx - pr.x, e.wy + 1 - pr.y, e.wz - pr.z);
       if (d > def.radius) continue;
-      const bonus = e.type === 'werewolf' || e.type === 'vampire' ? def.holyBonus : 1;
+      const bonus =
+        e.type === 'werewolf' || e.type === 'vampire' || e.type === 'countess' ? def.holyBonus : 1;
       const dmg = def.damage * Math.sqrt(1 - d / def.radius) * bonus;
       this.damageEnemy(
         e,

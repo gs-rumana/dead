@@ -41,6 +41,8 @@ import {
   nextFeature,
   smoothstep,
   stepMotor,
+  ENEMY_TYPES,
+  toWorld,
   trainToWorld,
   worldToTrain,
 } from '@dead-tracks/shared';
@@ -49,6 +51,9 @@ import { Combat } from './combat/Combat.ts';
 import { type Inventory, addToHotbar, starterInventory } from './combat/inventory.ts';
 import { ItemSystem } from './items/ItemSystem.ts';
 import { HandcarSim } from './vehicles/HandcarSim.ts';
+import { WeatherSim } from './world/WeatherSim.ts';
+import { FortSystem } from './world/FortSystem.ts';
+import { LandmarkSystem } from './world/LandmarkSystem.ts';
 import { TrainSim } from './train.ts';
 
 export interface SimOptions {
@@ -115,13 +120,18 @@ export class Sim {
   readonly enemySystem: EnemySystem;
   readonly combat: Combat;
   readonly items: ItemSystem;
+  readonly weather: WeatherSim;
+  readonly forts: FortSystem;
+  readonly landmarks: LandmarkSystem;
   /** One handcar per spur, waiting on the siding at its junction (§4.4). */
   readonly handcars: HandcarSim[];
   readonly handcarPoses: HandcarPose[];
   tick = 0;
   time = 0;
-  /** Night type for the current cycle (§4.5). M6 rolls the full set. */
-  nightType = 0;
+  /** Night type for the current night (§4.5). */
+  get nightType(): number {
+    return this.weather.night;
+  }
   /** The run ended (every player down at once, §4.1). */
   over = false;
   readonly players = new Map<string, SimPlayer>();
@@ -148,6 +158,9 @@ export class Sim {
     this.enemySystem = new EnemySystem(this);
     this.combat = new Combat(this);
     this.items = new ItemSystem(this);
+    this.weather = new WeatherSim(this);
+    this.forts = new FortSystem(this);
+    this.landmarks = new LandmarkSystem(this);
     this.handcars = this.world.spurs.map((spur, i) => new HandcarSim(i, spur));
     this.handcarPoses = this.handcars.map((h) => handcarPose(h.spur, h.s, makeHandcarPose()));
     this.updateTrainPose();
@@ -226,6 +239,11 @@ export class Sim {
     }
   }
 
+  /** A message for everyone. */
+  broadcast(text: string): void {
+    this.events.push({ ev: { e: 'toast', text } });
+  }
+
   /** A message for one player (events channel). */
   toast(id: string, text: string): void {
     this.events.push({ to: id, ev: { e: 'toast', text } });
@@ -295,6 +313,7 @@ export class Sim {
         if (typeof cmd.target === 'string') {
           const target = cmd.target.slice(0, 64);
           if (target.startsWith('handcar:')) this.useHandcar(p, Number(target.slice(8)));
+          else if (target === 'winch') this.forts.useWinch(p.id);
           else this.items.use(p, target, !!cmd.hold);
         }
         break;
@@ -358,6 +377,18 @@ export class Sim {
       case 'god':
         this.devGod = value !== 0;
         break;
+      case 'finale':
+        // Put the train just short of Fort Haven's gate.
+        this.train.s = this.forts.gateS - 30;
+        this.train.speed = 0;
+        this.updateTrainPose();
+        break;
+      case 'weather':
+        this.weather.force(value as 0);
+        break;
+      case 'night':
+        this.weather.force(this.weather.current, value as 0);
+        break;
       case 'respawn':
         this.respawnOnTrain(p);
         break;
@@ -407,6 +438,17 @@ export class Sim {
         if (pose) this.devTeleport(p, pose.x + pose.rx * 1.8, NaN, pose.z + pose.rz * 1.8);
         break;
       }
+      case 'landmark': {
+        // Stand at the landmark's front gate; value 10+i opens its door.
+        const l = this.landmarks.list[value % 10];
+        if (!l) break;
+        if (value >= 10) this.landmarks.devOpen(value % 10);
+        else {
+          const w = toWorld(l.st, -24, 0, 0);
+          this.devTeleport(p, w.x, NaN, w.z);
+        }
+        break;
+      }
       case 'town': {
         const spur = this.world.spurs[value | 0];
         if (spur) {
@@ -435,6 +477,14 @@ export class Sim {
           const a = yaw + this.rng.range(-0.6, 0.6);
           this.enemySystem.spawn('walker', p.wx - Math.sin(a) * d, p.wz - Math.cos(a) * d);
         }
+        break;
+      }
+      case 'monster': {
+        // One enemy of a given type (ENEMY_TYPES index) 12 m in front, frozen in place.
+        const type = ENEMY_TYPES[value] ?? 'walker';
+        const yaw = p.motor.yaw + (p.motor.frame === Frame.Train ? this.poses[0]!.yaw : 0);
+        const e = this.enemySystem.spawn(type, p.wx - Math.sin(yaw) * 9, p.wz - Math.cos(yaw) * 9);
+        e.yaw = yaw + Math.PI;
         break;
       }
       case 'horde': {
@@ -542,6 +592,7 @@ export class Sim {
       this.train.fuel = Math.max(this.train.fuel, 200);
       this.train.pressure = 1;
     }
+    this.train.limitS = this.forts.trainLimit;
     this.train.step(dt, this.route);
     this.updateTrainPose();
     this.stepHandcars(dt);
@@ -554,6 +605,11 @@ export class Sim {
     this.combat.stepProjectiles(dt);
     // 7. Carrying and cargo.
     this.items.step(dt);
+
+    // 9. Weather and time of day; the forts and the finale.
+    this.weather.step(dt);
+    this.forts.step(dt);
+    this.landmarks.step();
 
     // Health, revives and respawns (§4.9).
     for (const p of this.players.values()) this.stepHealth(p, dt);
@@ -889,12 +945,13 @@ export class Sim {
     }
     if (up === 0 && !soloHope) {
       this.over = true;
-      this.events.push({ ev: { e: 'toast', text: 'The run is over.' } });
+      this.forts.finish(false);
     }
   }
 
   killEnemy(e: SimEnemy, by: string, _zone: number, byTrain: boolean): void {
     if (e.state === 'dead') return;
+    if (by && by !== 'train') this.forts.kills++;
     e.hp = 0;
     e.state = 'dead';
     e.deadT = 0;

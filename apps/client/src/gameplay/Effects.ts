@@ -241,6 +241,42 @@ export class Effects {
     this.shake = Math.max(this.shake, Math.max(0, 1 - distToCamera / (r * 6)) * (holy ? 0.3 : 1));
   }
 
+  /** A vampire vanishing or arriving: a dark puff with red sparks. */
+  blink(x: number, y: number, z: number): void {
+    this.emit(x, y + 1.1, z, 0x241a2a, 26, 2.5, 0.1, 0.55, -0.8, 0.6, 2.5);
+    this.emit(x, y + 1.2, z, 0x9a1a1a, 10, 3.5, 0.04, 0.4, 1, 0.5, 2);
+  }
+
+  /** Dr. Voss's arc: sparks along a jagged path and a blue flash where it lands. */
+  zap(ax: number, ay: number, az: number, bx: number, by: number, bz: number): void {
+    const n = 14;
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      const j = i === 0 || i === n ? 0 : 0.35;
+      this.emit(
+        ax + (bx - ax) * t + (Math.random() - 0.5) * j,
+        ay + (by - ay) * t + (Math.random() - 0.5) * j,
+        az + (bz - az) * t + (Math.random() - 0.5) * j,
+        0xbfe6ff,
+        2,
+        0.8,
+        0.07,
+        0.16,
+        0,
+        0.3,
+        4,
+      );
+    }
+    const f =
+      this.flashes.find((fl) => fl.age >= fl.life) ??
+      (this.flashes[0] as (typeof this.flashes)[number]);
+    f.light.position.set(bx - this.ox, by + 0.5, bz - this.oz);
+    f.light.color.set(0x8fc8ff);
+    f.age = 0;
+    f.life = 0.15;
+    f.power = 60;
+  }
+
   decal(x: number, y: number, z: number, size: number, _color?: number): void {
     const d = this.decals[this.dNext] as (typeof this.decals)[number];
     this.dNext = (this.dNext + 1) % DECALS;

@@ -6,6 +6,8 @@ import {
   buildStation,
   buildTown,
   buildCamp,
+  buildFort,
+  buildLandmark,
   buildWagon,
   planCamps,
   planStructures,
@@ -39,6 +41,14 @@ export class World {
       if (f.kind === 'station' || f.kind === 'start')
         this.structures.push(buildStation(this.route, f, `s${n++}`));
     }
+    // Forts on the main line.
+    this.features
+      .filter((f) => f.kind === 'fort')
+      .forEach((f, i) => this.structures.push(...buildFort(this.route, f, i)));
+    // Landmark raids, one per biome.
+    this.features
+      .filter((f) => f.kind === 'landmark')
+      .forEach((f, i) => this.structures.push(buildLandmark(this.route, f, i, (x, z) => this.terrain.natural(x, z, f.s))));
     // Spurs and their towns.
     this.features
       .filter((f) => f.kind === 'junction')

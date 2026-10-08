@@ -89,7 +89,39 @@ function clock(phase: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
-export function Hud({ onMenu }: { onMenu: () => void }) {
+/** End of the run (§4.1): how far, how long, and what you did on the way. */
+function Results({ onLeave }: { onLeave: () => void }) {
+  const r = hud.result!;
+  const mins = Math.floor(r.minutes);
+  const secs = Math.round((r.minutes - mins) * 60);
+  return (
+    <div class="results interactive" data-testid="results">
+      <h2>{r.won ? 'You made it to Fort Haven' : 'The dead have the train'}</h2>
+      <p class="results-sub">
+        {r.won ? 'The gate shuts behind the last car.' : `The run ended at km ${r.km.toFixed(1)}.`}
+      </p>
+      <dl>
+        <dt>Distance</dt>
+        <dd>km {r.km.toFixed(1)} / 80</dd>
+        <dt>Time</dt>
+        <dd>
+          {mins}:{String(secs).padStart(2, '0')}
+        </dd>
+        <dt>Landmarks cleared</dt>
+        <dd>{r.landmarks} / 3</dd>
+        <dt>Bounties</dt>
+        <dd>{r.bounties}</dd>
+        <dt>Kills</dt>
+        <dd>{r.kills}</dd>
+      </dl>
+      <button data-testid="results-leave" onClick={onLeave}>
+        Back to the menu
+      </button>
+    </div>
+  );
+}
+
+export function Hud({ onMenu, onLeave }: { onMenu: () => void; onLeave: () => void }) {
   useTick(100);
   if (!hud.ready) return null;
   const now = performance.now();
@@ -102,6 +134,12 @@ export function Hud({ onMenu }: { onMenu: () => void }) {
         <div class="route-row">
           <span class="time" title="Time of day">
             {isNight ? '☾' : '☀'} Day {hud.day} · {clock(hud.dayPhase)}
+            {hud.weather && (
+              <span class={hud.bloodMoon ? 'weather blood' : 'weather'} data-testid="weather">
+                {' '}
+                · {hud.weather}
+              </span>
+            )}
           </span>
           <span class="km" data-testid="km">
             km {km.toFixed(1)} / 80
@@ -109,11 +147,33 @@ export function Hud({ onMenu }: { onMenu: () => void }) {
         </div>
         <div class="route-bar">
           <div class="route-fill" style={{ width: `${(km / 80) * 100}%` }} />
-          {[27, 40, 54].map((k) => (
-            <div key={k} class="route-mark" style={{ left: `${(k / 80) * 100}%` }} />
+          {[27, 54].map((k) => (
+            <div key={k} class="route-mark biome" style={{ left: `${(k / 80) * 100}%` }} />
+          ))}
+          {hud.marks.map((m) => (
+            <div
+              key={m.name}
+              class={`route-mark ${m.kind}`}
+              title={`${m.name} (km ${Math.round(m.km)})`}
+              style={{ left: `${(m.km / 80) * 100}%` }}
+            />
           ))}
         </div>
       </div>
+
+      {hud.objective && (
+        <div class="objective" data-testid="objective">
+          {hud.objective}
+        </div>
+      )}
+      {hud.boss && (
+        <div class="boss" data-testid="boss-bar">
+          <span>{hud.boss}</span>
+          <div class="bar boss-hp">
+            <div style={{ width: `${Math.max(0, Math.min(1, hud.bossHp)) * 100}%` }} />
+          </div>
+        </div>
+      )}
 
       {hud.hurt > 0.02 && <div class="hurt" style={{ opacity: Math.min(0.8, hud.hurt) }} />}
 
@@ -178,7 +238,8 @@ export function Hud({ onMenu }: { onMenu: () => void }) {
           </span>
         </div>
       )}
-      {hud.over && (
+      {hud.result && <Results onLeave={onLeave} />}
+      {hud.over && !hud.result && (
         <div class="over" data-testid="run-over">
           <h2>The dead have the train</h2>
           <p>Your party made it to km {Math.min(80, hud.km).toFixed(1)}.</p>

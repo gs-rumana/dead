@@ -157,6 +157,17 @@ export function DevPanel({ game }: { game: Game }) {
       <button onClick={() => dev('cab')}>To cab</button>
       <button onClick={() => dev('respawn')}>Respawn</button>
       <button onClick={() => dev('ground')}>Step off</button>
+      <button onClick={() => dev('weather', 1)}>Rain</button>
+      <button onClick={() => dev('weather', 2)}>Storm</button>
+      <button onClick={() => dev('weather', 3)}>Fog</button>
+      <button onClick={() => dev('weather', 4)}>Dust</button>
+      <button onClick={() => dev('weather', 0)}>Clear</button>
+      <button onClick={() => dev('night', 1)}>Full moon</button>
+      <button onClick={() => dev('night', 2)}>Blood moon</button>
+      <button onClick={() => dev('landmark', 0)}>Ranch</button>
+      <button onClick={() => dev('landmark', 1)}>Mine</button>
+      <button onClick={() => dev('landmark', 2)}>Chateau</button>
+      <button onClick={() => dev('finale')}>Finale</button>
       <NetSimControls />
     </div>
   );

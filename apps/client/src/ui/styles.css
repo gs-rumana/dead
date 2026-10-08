@@ -923,3 +923,117 @@ button.secondary {
   background: rgba(0, 0, 0, 0.45);
   color: var(--ink);
 }
+
+/* The full route (§4.1, §4.5, §4.6) */
+.route-mark.biome {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.route-mark.junction {
+  width: 1px;
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.route-mark.landmark,
+.route-mark.fort {
+  top: -3px;
+  width: 7px;
+  height: calc(100% + 6px);
+  margin-left: -3px;
+  border-radius: 1px;
+}
+
+.route-mark.landmark {
+  background: #b9573b;
+  transform: rotate(45deg) scale(0.8);
+}
+
+.route-mark.fort {
+  background: var(--ink);
+}
+
+.weather {
+  color: var(--ink-dim);
+}
+
+.weather.blood {
+  color: #e0574a;
+}
+
+.objective {
+  position: absolute;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border-radius: 6px;
+  background: rgba(22, 17, 13, 0.75);
+  color: var(--accent);
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.boss {
+  position: absolute;
+  top: 100px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(460px, 80vw);
+  text-align: center;
+  font-family: Georgia, serif;
+  font-size: 18px;
+  letter-spacing: 0.06em;
+  text-shadow: 0 1px 3px #000;
+}
+
+.boss .bar.boss-hp {
+  width: 100%;
+  height: 10px;
+  margin-top: 4px;
+}
+
+.bar.boss-hp > div {
+  background: #a3261d;
+}
+
+.results {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(10, 6, 4, 0.82);
+  pointer-events: auto;
+}
+
+.results h2 {
+  font-family: Georgia, serif;
+  font-size: 40px;
+  margin: 0;
+  color: var(--accent);
+}
+
+.results-sub {
+  margin: 0 0 8px;
+  color: var(--ink-dim);
+}
+
+.results dl {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 6px 28px;
+  margin: 0 0 14px;
+  font-size: 17px;
+}
+
+.results dt {
+  color: var(--ink-dim);
+}
+
+.results dd {
+  margin: 0;
+  text-align: right;
+  font-weight: 650;
+}

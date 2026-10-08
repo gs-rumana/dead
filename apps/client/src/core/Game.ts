@@ -26,6 +26,12 @@ import {
   worldToTrain,
   inputToWire,
   SIM_DT,
+  BOSS_NAMES,
+  ENEMY_TYPES,
+  NIGHT_NAMES,
+  WEATHER_NAMES,
+  Weather,
+  isBoss,
 } from '@dead-tracks/shared';
 import type { GameEvent } from '@dead-tracks/shared';
 import type { Connection } from '../net/Connection.ts';
@@ -33,6 +39,7 @@ import { backendName, createRenderer } from '../render/createRenderer.ts';
 import { paletteSkinnedMaterial } from '../render/materials.ts';
 import { type Humanoid, OUTFITS, createHumanoid } from '../render/models/humanoid.ts';
 import { Sky } from '../render/Sky.ts';
+import { WeatherFx } from '../render/WeatherFx.ts';
 import { CameraRig } from '../gameplay/CameraRig.ts';
 import { Effects } from '../gameplay/Effects.ts';
 import { EnemyView } from '../gameplay/EnemyView.ts';
@@ -100,6 +107,7 @@ export class Game {
   shopOpen = '';
   private space!: PhysicsSpace;
   private sky!: Sky;
+  private weatherFx!: WeatherFx;
   private terrainStreamer!: TerrainStreamer;
   private trackStreamer!: TrackStreamer;
   private trainView!: TrainView;
@@ -173,6 +181,7 @@ export class Game {
     this.sky = new Sky(1200);
     this.scene.add(this.sky.dome, this.sky.sun, this.sky.sun.target, this.sky.hemi);
     this.scene.fog = this.sky.fog;
+    this.weatherFx = new WeatherFx(this.scene, this.sky, this.quality.tier === 'low');
 
     this.terrainStreamer = new TerrainStreamer(
       this.worldRoot,
@@ -190,6 +199,10 @@ export class Game {
     this.selfBody.mesh.castShadow = true;
     this.scene.add(this.selfBody.mesh);
     this.features = this.world.features;
+    hud.marks = this.features
+      .filter((f) => f.kind === 'junction' || f.kind === 'landmark' || f.kind === 'fort')
+      .map((f) => ({ km: f.km, kind: f.kind, name: f.name }));
+    hud.result = null;
     this.structureView = new StructureView(this.worldRoot, this.world);
     this.handcarView = new HandcarView(this.scene, this.world);
     this.remotes.handcarPose = (i) => this.handcarView.pose(i);
@@ -385,11 +398,41 @@ export class Game {
     const pz = eye.z - Math.sin(yaw) * 0.45;
     this.lookYaw = yaw - offset;
     this.lookPitch = Math.atan2(ty - eye.y, Math.hypot(b.x - px, b.z - pz));
+    this.aimHold = { x: b.x, y: ty, z: b.z, id: b.id, head, until: performance.now() + 400 };
     return b.id;
+  }
+
+  /** Test hooks keep the crosshair on a point for a moment while the camera settles. */
+  private aimHold: { x: number; y: number; z: number; id: string; head: boolean; until: number } | null =
+    null;
+
+  /** Re-aims from where the camera actually is (the crosshair ray starts there). */
+  private holdAim(now: number): void {
+    const h = this.aimHold;
+    if (!h) return;
+    if (now > h.until) {
+      this.aimHold = null;
+      return;
+    }
+    if (h.id) {
+      // Follow a moving enemy.
+      const p = this.enemyView.position(h.id);
+      if (p) {
+        h.x = p.x;
+        h.y = p.y + (h.head ? 1.66 : 1.15);
+        h.z = p.z;
+      }
+    }
+    const c = this.rig.worldPos;
+    const offset =
+      this.local.motor.frame === Frame.Train ? trainYawAt(this.trainView.poses, this.local.motor.z) : 0;
+    this.lookYaw = Math.atan2(-(h.x - c.x), -(h.z - c.z)) - offset;
+    this.lookPitch = Math.atan2(h.y - c.y, Math.hypot(h.x - c.x, h.z - c.z));
   }
 
   /** Test hook: point the crosshair at a world position. */
   lookAt(x: number, y: number, z: number): void {
+    this.aimHold = { x, y, z, id: '', head: false, until: performance.now() + 400 };
     const eye = this.eyeWorld();
     const offset =
       this.local.motor.frame === Frame.Train
@@ -584,7 +627,53 @@ export class Game {
         break;
       case 'enemyAttack':
         break;
+      case 'lightning': {
+        this.weatherFx.lightning();
+        const cam = this.rig.worldPos;
+        const d = Math.hypot(ev.x - cam.x, ev.z - cam.z);
+        this.audio?.thunder(Math.min(4, d / 343), Math.max(0, 1 - d / 600));
+        break;
+      }
+      case 'growl': {
+        const type = ENEMY_TYPES[ev.type];
+        const pos = this.enemyView.position(ev.id);
+        if (pos && type) this.audio?.howl(this.renderPos(pos.x, pos.y + 2, pos.z), isBoss(type));
+        break;
+      }
+      case 'blink':
+        this.effects.blink(ev.x, ev.y, ev.z);
+        this.audio?.blink(this.renderPos(ev.x, ev.y + 1, ev.z));
+        break;
+      case 'zap':
+        this.effects.zap(ev.ox, ev.oy, ev.oz, ev.tx, ev.ty, ev.tz);
+        this.audio?.zap(this.renderPos(ev.ox, ev.oy, ev.oz));
+        break;
+      case 'boss': {
+        const type = ENEMY_TYPES[ev.type];
+        if (ev.awake && type) {
+          const pos = this.nearestEnemyOf(type);
+          if (pos) this.audio?.howl(this.renderPos(pos.x, pos.y + 2, pos.z), true);
+        }
+        break;
+      }
+      case 'runEnd':
+        break;
     }
+  }
+
+  private nearestEnemyOf(type: string): { x: number; y: number; z: number } | null {
+    let best: { x: number; y: number; z: number } | null = null;
+    let bd = Infinity;
+    const eye = this.eyeWorld();
+    this.enemyView.forEach((_id, t, x, y, z, dead) => {
+      if (t !== type || dead) return;
+      const d = Math.hypot(x - eye.x, z - eye.z);
+      if (d < bd) {
+        bd = d;
+        best = { x, y, z };
+      }
+    });
+    return best;
   }
 
   /** Where a player's hands are (world), for carried items. */
@@ -637,6 +726,7 @@ export class Game {
               yaw: this.lookYaw,
               pitch: this.lookPitch,
               carryKind: me?.carryKind ?? '',
+              carryId: me?.carry ?? '',
             },
             this.conn.state,
             this.world,
@@ -832,6 +922,7 @@ export class Game {
     this.effects.shake = Math.max(0, this.effects.shake - dt * 2);
     const sx = (Math.random() - 0.5) * shakeAmt;
     const sy = (Math.random() - 0.5) * shakeAmt;
+    this.holdAim(now);
     // Handcar riders: the camera works in world space around the seat.
     const seated = m.frame >= Frame.Handcar;
     this.rig.update(
@@ -875,6 +966,8 @@ export class Game {
       Math.min(this.quality.viewDistance, 420),
       (k) => this.conn.state.props.get(k) ?? 0,
       this.sky.night,
+      this.conn.state.finale,
+      this.conn.state.winch,
     );
     this.itemView.update(
       dt,
@@ -907,8 +1000,14 @@ export class Game {
 
     this.updateAudio(m.frame === Frame.Train, trainS);
 
-    // Sky, lights, shadows.
-    this.sky.update(this.conn.state.dayPhase, this.camera);
+    // Weather, sky, lights, shadows.
+    const rs = this.conn.state;
+    this.weatherFx.update(
+      dt,
+      { from: rs.weatherFrom, to: rs.weatherTo, blend: rs.weatherBlend, night: rs.night, s: trainS },
+      this.camera.position,
+    );
+    this.sky.update(rs.dayPhase, this.camera);
     this.updateShadowCamera();
 
     this.renderer.info.reset();
@@ -955,6 +1054,7 @@ export class Game {
       loco.cz - this.originZ + loco.bz * -3.6,
     );
     const speed = Math.abs(this.trainClock.speed);
+    a.setWeather(this.weatherFx.rainLevel, this.weatherFx.windLevel);
     a.setWind(onTrain ? speed : this.selfSpeed);
     // Rail joints every 12.5 m.
     const joint = Math.floor(trainS / 12.5);
@@ -1141,6 +1241,7 @@ export class Game {
     hud.bleed = me?.bleed ?? 0;
     hud.revive = me?.revive ?? 0;
     hud.over = this.conn.state.players.size > 0 && this.isOver();
+    this.updateRunHud();
     hud.enemies = this.enemyView.count;
     if (hud.life === Life.Dead) {
       const next = nextFeature(this.features, this.trainClock.s, ['station', 'start', 'fort']);
@@ -1152,6 +1253,49 @@ export class Game {
         hud.prompt = `Hold to revive ${downed} (${hud.bandage} bandage, ${hud.tonic} tonic)`;
     } else if (hud.life === Life.Downed && hud.tonic > 0) {
       hud.prompt = 'Use your tonic';
+    }
+  }
+
+  /** Weather, bosses, fort objectives and the results (§4.1, §4.5, §4.6). */
+  private updateRunHud(): void {
+    const st = this.conn.state;
+    const isNight = st.dayPhase >= 0.6;
+    const w = st.weatherBlend >= 0.5 ? st.weatherTo : st.weatherFrom;
+    hud.weather = isNight
+      ? st.night !== 0 ? NIGHT_NAMES[st.night] ?? '' : w !== Weather.Clear ? WEATHER_NAMES[w] ?? '' : ''
+      : w !== Weather.Clear ? WEATHER_NAMES[w] ?? '' : '';
+    hud.bloodMoon = isNight && st.night === 2;
+    // The nearest awake boss within 80 m gets the health bar.
+    const eye = this.eyeWorld();
+    let boss = '';
+    let bossHp = 0;
+    let bd = 80;
+    st.enemies.forEach((e, id) => {
+      const type = ENEMY_TYPES[e.type];
+      if (!type || !isBoss(type)) return;
+      const pos = this.enemyView.position(id);
+      const d = pos ? Math.hypot(pos.x - eye.x, pos.z - eye.z) : Infinity;
+      if (d < bd && e.hp > 0) {
+        bd = d;
+        boss = BOSS_NAMES[type] ?? '';
+        bossHp = e.hp / 255;
+      }
+    });
+    hud.boss = boss;
+    hud.bossHp = bossHp;
+    // Fort objectives.
+    if (st.checkpoint === 1) hud.objective = `Hold Fort Ironwood · ${Math.max(0, st.checkpointT)}s`;
+    else if (st.finale === 1) hud.objective = `Winching the gate · ${Math.round(st.winch * 100)}% · hold them off!`;
+    else if (st.finale === 2) hud.objective = 'The gate is open. Drive the train through!';
+    else hud.objective = '';
+    if (st.result && !hud.result) {
+      try {
+        hud.result = JSON.parse(st.result) as typeof hud.result;
+        // Free the mouse for the results screen.
+        if (document.pointerLockElement) document.exitPointerLock();
+      } catch {
+        hud.result = null;
+      }
     }
   }
 

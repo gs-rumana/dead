@@ -134,6 +134,8 @@ function place(
     if (n) return null;
   }
   if (terrain.nearestSpur(x, z, CLEARANCE[kind] * 0.7 + 1)) return null;
+  // Nothing grows through floors and walls.
+  if (terrain.onPad(x, z, kind === PropKind.Grass ? -3 : 2)) return null;
   const h2 = hashInts(seed, gx, gz, slot + 100);
   return {
     kind,

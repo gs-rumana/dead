@@ -55,6 +55,22 @@ export const hud = {
   shop: '',
   pack: [] as string[],
   toasts: [] as Array<{ id: number; text: string; until: number }>,
+  // The full route (§4.1, §4.5, §4.6)
+  /** Route bar marks: junctions, landmarks and forts. */
+  marks: [] as Array<{ km: number; kind: string; name: string }>,
+  weather: '',
+  bloodMoon: false,
+  boss: '',
+  bossHp: 0,
+  objective: '',
+  result: null as null | {
+    won: boolean;
+    km: number;
+    minutes: number;
+    landmarks: number;
+    bounties: number;
+    kills: number;
+  },
 };
 
 let toastId = 0;

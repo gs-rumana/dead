@@ -24,6 +24,8 @@ export class TrainSim {
   stokeCooldown = 0;
   /** Development only: multiplies top speed and traction for soak tests. */
   devSpeedScale = 1;
+  /** A shut gate ahead (Fort Haven): the train can't pass this s. */
+  limitS = Infinity;
 
   constructor(startS: number) {
     this.s = startS;
@@ -85,8 +87,8 @@ export class TrainSim {
     if (this.s < minS) {
       this.s = minS;
       this.speed = Math.max(0, this.speed);
-    } else if (this.s > maxS) {
-      this.s = maxS;
+    } else if (this.s > Math.min(maxS, this.limitS)) {
+      this.s = Math.min(maxS, this.limitS);
       this.speed = Math.min(0, this.speed);
     }
 

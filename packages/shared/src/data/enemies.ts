@@ -1,5 +1,14 @@
 /** Enemy tuning (§4.6). */
-export type EnemyType = 'walker' | 'runner' | 'brute' | 'outlaw' | 'werewolf' | 'vampire';
+export type EnemyType =
+  | 'walker'
+  | 'runner'
+  | 'brute'
+  | 'outlaw'
+  | 'werewolf'
+  | 'vampire'
+  | 'rancher'
+  | 'voss'
+  | 'countess';
 
 export interface EnemyDef {
   type: EnemyType;
@@ -122,7 +131,73 @@ export const ENEMIES: Record<EnemyType, EnemyDef> = {
     weight: [0, 0],
     fromNight: 0,
   },
+  /** Landmark bosses (§4.6). */
+  rancher: {
+    type: 'rancher',
+    hp: 2600,
+    speed: 1.2,
+    chaseSpeed: 2.4,
+    damage: 38,
+    attackRange: 3,
+    attackInterval: 1.9,
+    sight: 60,
+    boards: false,
+    scale: 2.0,
+    bodyValue: 120,
+    bodyFuel: 90,
+    weight: [0, 0],
+    fromNight: 0,
+  },
+  voss: {
+    type: 'voss',
+    hp: 1800,
+    speed: 1.6,
+    chaseSpeed: 3,
+    damage: 22,
+    attackRange: 35,
+    attackInterval: 2.1,
+    sight: 70,
+    boards: false,
+    scale: 1.15,
+    bodyValue: 120,
+    bodyFuel: 40,
+    weight: [0, 0],
+    fromNight: 0,
+  },
+  countess: {
+    type: 'countess',
+    hp: 2200,
+    speed: 3,
+    chaseSpeed: 6.5,
+    damage: 28,
+    attackRange: 1.8,
+    attackInterval: 0.8,
+    sight: 80,
+    boards: false,
+    scale: 1.1,
+    bodyValue: 140,
+    bodyFuel: 40,
+    weight: [0, 0],
+    fromNight: 0,
+  },
 };
+
+/** Landmark bosses (§4.6) and their names on the health bar. */
+export const BOSS_NAMES: Partial<Record<EnemyType, string>> = {
+  rancher: 'The Rancher',
+  voss: 'Dr. Voss',
+  countess: 'The Countess',
+};
+
+export function isBoss(type: EnemyType): boolean {
+  return type === 'rancher' || type === 'voss' || type === 'countess';
+}
+
+/** Bosses scale with the party so a solo player can win (§4.6). */
+export function bossHp(type: EnemyType, players: number): number {
+  const k = [0.45, 0.7, 0.88, 1][Math.max(0, Math.min(3, players - 1))]!;
+  return Math.round(ENEMIES[type].hp * k);
+}
 
 /** Spawn director (§4.6). */
 export const DIRECTOR = {

@@ -118,6 +118,14 @@ export class Terrain {
     }
   }
 
+  /** True on the flat ground under a structure, widened by margin (props stay off it). */
+  onPad(x: number, z: number, margin = 0): boolean {
+    const list = this.pads.get(Math.floor(x / PAD_CELL) * 100003 + Math.floor(z / PAD_CELL));
+    if (!list) return false;
+    for (const p of list) if (Math.hypot(x - p.x, z - p.z) < p.r + margin) return true;
+    return false;
+  }
+
   height(x: number, z: number): number {
     let h: number;
     const n = this.route.nearest(x, z, BED_BLEND + BED_HALF_WIDTH, this.near);

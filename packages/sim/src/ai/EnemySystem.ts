@@ -8,6 +8,7 @@ import {
   ENEMIES,
   ENEMY_TYPES,
   FORT,
+  NightType,
   type EnemyDef,
   type EnemyType,
   Frame,
@@ -16,8 +17,10 @@ import {
   TRAIN_LENGTH,
   WORLD,
   type Vec3,
+  isBoss,
   insideTrainBounds,
   makeFrame,
+  pieceWorld,
   tileKey,
   tileProps,
   trainToWorld,
@@ -43,6 +46,8 @@ export interface SimEnemy {
   vx: number;
   vz: number;
   hp: number;
+  /** Full health (bosses scale with the party). */
+  maxHp: number;
   state: AiState;
   anim: number;
   target: string | null;
@@ -68,12 +73,26 @@ export interface SimEnemy {
   /** Outlaws: the camp they guard. */
   homeX: number;
   homeZ: number;
+  /** Bosses: seconds until the next summon. */
+  bossT: number;
 }
 
 interface Obstacle {
   x: number;
   z: number;
   r: number;
+}
+
+/** A building piece as an oriented box on the ground plane. */
+interface Box2 {
+  x: number;
+  z: number;
+  hx: number;
+  hz: number;
+  c: number;
+  s: number;
+  bottom: number;
+  top: number;
 }
 
 /**
@@ -88,6 +107,8 @@ export class EnemySystem {
   /** Recent noise adds to the director's budget (§4.6). */
   noise = 0;
   private readonly obstacles = new Map<string, Obstacle[]>();
+  /** Solid building pieces by 16 m cell (lazily filled). */
+  private readonly boxes = new Map<number, Box2[]>();
   private readonly grid = new Map<number, SimEnemy[]>();
   private readonly tmp: Vec3 = { x: 0, y: 0, z: 0 };
   private readonly frame = makeFrame();
@@ -123,6 +144,7 @@ export class EnemySystem {
       vx: 0,
       vz: 0,
       hp: def.hp,
+      maxHp: def.hp,
       state: 'wander',
       anim: Anim.Idle,
       target: null,
@@ -143,6 +165,7 @@ export class EnemySystem {
       blocked: false,
       homeX: x,
       homeZ: z,
+      bossT: 8,
     };
     this.enemies.set(e.id, e);
     this.updateWorldPos(e);
@@ -155,6 +178,8 @@ export class EnemySystem {
 
   /** Something loud happened (§4.6: gunshots and the whistle attract enemies). */
   makeNoise(x: number, z: number, radius: number): void {
+    // Storms and rain cover sounds (§4.5).
+    radius *= this.sim.weather.senses.hearing;
     this.noise = Math.min(this.noise + radius / 40, DIRECTOR.noiseBudget * 2);
     const r2 = radius * radius;
     for (const e of this.enemies.values()) {
@@ -195,7 +220,8 @@ export class EnemySystem {
         continue;
       }
       // Raiders gathering at a parked train stay even with everyone far away (§4.3).
-      const raiding = e.state === 'raid' || e.state === 'ambush' || e.frame === Frame.Train;
+      const raiding =
+        e.state === 'raid' || e.state === 'ambush' || e.frame === Frame.Train || isBoss(e.type);
       if (nearest > DIRECTOR.despawn && e.frame === Frame.World && !raiding) {
         this.enemies.delete(e.id);
         continue;
@@ -283,9 +309,17 @@ export class EnemySystem {
     for (const p of players) {
       // Downed and disconnected players are left alone (§4.9, §6.8).
       if (p.life !== 0 || !p.connected) continue;
-      const d = Math.hypot(p.wx - e.wx, p.wz - e.wz);
-      // Noise makes them notice from farther away while alerted.
-      const reach = e.state === 'alerted' ? e.def.sight * 1.6 : e.def.sight;
+      let d = Math.hypot(p.wx - e.wx, p.wz - e.wz);
+      // Bosses keep to their landmark.
+      if (isBoss(e.type) && Math.hypot(p.wx - e.homeX, p.wz - e.homeZ) > 55) continue;
+      // Werewolves hunt whoever is alone (§4.6).
+      if (e.type === 'werewolf') {
+        const alone = players.every((o) => o === p || Math.hypot(o.wx - p.wx, o.wz - p.wz) > 15);
+        if (alone) d *= 0.5;
+      }
+      // Noise makes them notice from farther away while alerted; weather dulls sight (§4.5).
+      const sight = e.def.sight * this.sim.weather.senses.sight;
+      const reach = e.state === 'alerted' ? sight * 1.6 : sight;
       if (d < Math.min(bestD, reach)) {
         bestD = d;
         best = p;
@@ -303,6 +337,7 @@ export class EnemySystem {
       this.thinkOutlaw(e, players);
       return;
     }
+    if (isBoss(e.type) && this.thinkBoss(e, players, dt)) return;
     if (e.state === 'raid') {
       // Heading for the parked train (§4.3): climb aboard and wait.
       const target = this.pickTarget(e, players);
@@ -334,7 +369,11 @@ export class EnemySystem {
 
     if (e.state === 'wander' && (e.stateT <= 0 || Math.hypot(e.goalX - e.x, e.goalZ - e.z) < 1)) {
       e.stateT = sim.rng.range(3, 8);
-      if (e.frame === Frame.World) {
+      if (isBoss(e.type)) {
+        // Pace the grounds of the landmark.
+        e.goalX = e.homeX + sim.rng.range(-6, 6);
+        e.goalZ = e.homeZ + sim.rng.range(-6, 6);
+      } else if (e.frame === Frame.World) {
         e.goalX = e.x + sim.rng.range(-12, 12);
         e.goalZ = e.z + sim.rng.range(-12, 12);
       } else {
@@ -347,12 +386,34 @@ export class EnemySystem {
       const p = sim.players.get(e.target);
       if (!p) return;
       const dist = Math.hypot(p.wx - e.wx, p.wy - e.wy, p.wz - e.wz);
+      // Werewolves leap the last few metres; vampires blink in (§4.6).
+      if (e.frame === Frame.World && p.motor.frame !== Frame.Train && e.attackT <= 0 && e.stateT <= 0) {
+        if (e.type === 'werewolf' && dist > 3 && dist < 9) {
+          e.stateT = 3;
+          const k = (dist - 1.5) / dist;
+          e.climb = { t: 0.55, tx: e.x + (p.wx - e.wx) * k, ty: e.y + 1.2, tz: e.z + (p.wz - e.wz) * k };
+          e.anim = Anim.Run;
+          sim.events.push({ ev: { e: 'growl', id: e.id, type: 4 } });
+          return;
+        }
+        if ((e.type === 'vampire' || e.type === 'countess') && dist > 5 && dist < 22) {
+          e.stateT = 4 + sim.rng.next() * 2;
+          const a = sim.rng.range(0, Math.PI * 2);
+          sim.events.push({ ev: { e: 'blink', x: e.wx, y: e.wy, z: e.wz } });
+          e.x = p.wx + Math.cos(a) * 2.4;
+          e.z = p.wz + Math.sin(a) * 2.4;
+          e.y = sim.terrain.height(e.x, e.z);
+          sim.events.push({ ev: { e: 'blink', x: e.x, y: e.y, z: e.z } });
+          return;
+        }
+      }
       if (dist <= e.def.attackRange) {
         e.state = 'attack';
         if (e.attackT <= 0) {
           e.attackT = e.def.attackInterval;
           e.anim = Anim.Attack;
           sim.damagePlayer(p, e.def.damage, e.wx, e.wz, e.id);
+          if (e.type === 'vampire' || e.type === 'countess') e.hp = Math.min(e.maxHp, e.hp + e.def.damage);
           sim.events.push({ ev: { e: 'enemyAttack', id: e.id } });
         }
       } else {
@@ -537,6 +598,7 @@ export class EnemySystem {
 
     if (e.frame === Frame.World) {
       e.y = sim.terrain.height(e.x, e.z);
+      this.collideBuildings(e);
     } else {
       // Walk on the decks; fall off the edges back into the world.
       if (!insideTrainBounds(e.x, e.y, e.z)) {
@@ -550,6 +612,77 @@ export class EnemySystem {
         if (e.y < 0.2) this.toWorld(e);
       }
     }
+  }
+
+  /** Walls stop them; low surfaces (platforms, porches) they step up onto. */
+  private collideBuildings(e: SimEnemy): void {
+    const list = this.boxesAt(e.x, e.z);
+    if (!list.length) return;
+    const r = 0.35 * e.def.scale;
+    for (const b of list) {
+      const dx = e.x - b.x;
+      const dz = e.z - b.z;
+      // Into the box's frame.
+      const lx = b.c * dx - b.s * dz;
+      const lz = b.s * dx + b.c * dz;
+      const px = Math.max(-b.hx, Math.min(b.hx, lx));
+      const pz = Math.max(-b.hz, Math.min(b.hz, lz));
+      const ox = lx - px;
+      const oz = lz - pz;
+      const d2 = ox * ox + oz * oz;
+      if (d2 >= r * r) continue;
+      if (e.y > b.top - 0.2 || e.y + 2 < b.bottom) continue;
+      if (b.top - e.y <= 1.4) {
+        // Step up onto it.
+        e.y = b.top;
+        continue;
+      }
+      let nx: number;
+      let nz: number;
+      if (d2 > 1e-8) {
+        const d = Math.sqrt(d2);
+        nx = (ox / d) * (r - d);
+        nz = (oz / d) * (r - d);
+      } else {
+        // Centre inside: push out along the shallowest axis.
+        const ex = b.hx - Math.abs(lx);
+        const ez = b.hz - Math.abs(lz);
+        if (ex < ez) {
+          nx = Math.sign(lx || 1) * (ex + r);
+          nz = 0;
+        } else {
+          nx = 0;
+          nz = Math.sign(lz || 1) * (ez + r);
+        }
+      }
+      // Back to world.
+      e.x += b.c * nx + b.s * nz;
+      e.z += -b.s * nx + b.c * nz;
+    }
+  }
+
+  private boxesAt(x: number, z: number): Box2[] {
+    const cx = Math.floor(x / 16);
+    const cz = Math.floor(z / 16);
+    const key = cx * 100003 + cz;
+    let list = this.boxes.get(key);
+    if (list) return list;
+    list = [];
+    const mx = (cx + 0.5) * 16;
+    const mz = (cz + 0.5) * 16;
+    for (const st of this.sim.world.structuresNear(mx, mz, 24)) {
+      for (const p of st.pieces) {
+        if (!p.solid || p.kind === 'door' || p.kind === 'board' || p.kind === 'gate') continue;
+        const w = pieceWorld(st, p);
+        const yaw = st.yaw + p.ry;
+        const box: Box2 = { x: w.x, z: w.z, hx: p.hx, hz: p.hz, c: Math.cos(yaw), s: Math.sin(yaw), bottom: w.y - p.hy, top: w.y + p.hy };
+        const reach = Math.hypot(p.hx, p.hz) + 1;
+        if (Math.abs(w.x - mx) < 8 + reach && Math.abs(w.z - mz) < 8 + reach) list.push(box);
+      }
+    }
+    this.boxes.set(key, list);
+    if (this.boxes.size > 512) this.boxes.delete(this.boxes.keys().next().value as number);
+    return list;
   }
 
   private toWorld(e: SimEnemy): void {
@@ -692,6 +825,112 @@ export class EnemySystem {
     }
   }
 
+  /**
+   * Landmark bosses (§4.6). Returns true when the boss's move used this think.
+   * The Rancher charges and stomps; Dr. Voss keeps his distance, throws arcs and
+   * raises the dead; the Countess blinks, drains and calls her runners.
+   */
+  private thinkBoss(e: SimEnemy, players: SimPlayer[], dt: number): boolean {
+    const sim = this.sim;
+    e.bossT -= dt;
+    const target = this.pickTarget(e, players);
+    if (!target) {
+      if (e.state !== 'wander') {
+        // Lost them: walk home and recover.
+        e.state = 'wander';
+        e.target = null;
+        e.stateT = 0;
+      }
+      e.hp = Math.min(e.maxHp, e.hp + e.maxHp * 0.02 * dt);
+      return false;
+    }
+    const dist = Math.hypot(target.wx - e.wx, target.wz - e.wz);
+    e.target = target.id;
+    if (e.state !== 'attack') e.state = 'chase';
+    if (e.bossT <= 0 && e.type !== 'rancher' && this.alive < 70) {
+      // Summon a few helpers around the boss.
+      e.bossT = e.type === 'voss' ? 14 : 16;
+      const n = e.type === 'voss' ? 3 : 2;
+      for (let i = 0; i < n; i++) {
+        const a = sim.rng.range(0, Math.PI * 2);
+        const m = this.spawn(
+          e.type === 'voss' ? 'walker' : 'runner',
+          e.x + Math.cos(a) * 4,
+          e.z + Math.sin(a) * 4,
+        );
+        m.state = 'chase';
+        m.target = target.id;
+      }
+      sim.events.push({ ev: { e: 'growl', id: e.id, type: ENEMY_TYPES.indexOf(e.type) } });
+    }
+    if (e.type === 'rancher' && e.attackT <= 0 && e.stateT <= 0) {
+      if (dist < 6) {
+        // Ground stomp: everyone close takes a hit.
+        e.stateT = 6;
+        e.attackT = e.def.attackInterval;
+        e.anim = Anim.Attack;
+        sim.events.push({ ev: { e: 'explode', x: e.wx, y: e.wy, z: e.wz, r: 5, holy: false } });
+        for (const p of players) {
+          if (p.life !== 0) continue;
+          if (Math.hypot(p.wx - e.wx, p.wz - e.wz) < 6.5 && Math.abs(p.wy - e.wy) < 3)
+            sim.damagePlayer(p, 24, e.wx, e.wz, e.id);
+        }
+        return true;
+      }
+      if (dist > 9 && dist < 22) {
+        // Charge.
+        e.stateT = 7;
+        const k = (dist - 2.5) / dist;
+        e.climb = { t: 1.1, tx: e.x + (target.wx - e.wx) * k, ty: e.y, tz: e.z + (target.wz - e.wz) * k };
+        e.anim = Anim.Run;
+        e.yaw = Math.atan2(-(target.wx - e.wx), -(target.wz - e.wz));
+        sim.events.push({ ev: { e: 'growl', id: e.id, type: ENEMY_TYPES.indexOf(e.type) } });
+        return true;
+      }
+    }
+    if (e.type === 'voss') {
+      e.target = target.id;
+      e.state = 'chase';
+      const dx = target.wx - e.wx;
+      const dz = target.wz - e.wz;
+      const d = dist || 1;
+      const strafe = Math.sin(sim.time * 0.5) > 0 ? 1 : -1;
+      e.goalX = e.x + (d < 12 ? (-dx / d) * 6 : d > 28 ? (dx / d) * 6 : (-dz / d) * strafe * 4);
+      e.goalZ = e.z + (d < 12 ? (-dz / d) * 6 : d > 28 ? (dz / d) * 6 : (dx / d) * strafe * 4);
+      e.yaw = Math.atan2(-dx, -dz);
+      if (e.attackT > 0 || d > e.def.attackRange) return true;
+      e.attackT = e.def.attackInterval * sim.rng.range(0.8, 1.2);
+      e.anim = Anim.Attack;
+      const ox = e.wx - Math.sin(e.yaw) * 0.6;
+      const oy = e.wy + 1.6 * e.def.scale;
+      const oz = e.wz - Math.cos(e.yaw) * 0.6;
+      const ty = target.wy + 1.1;
+      const len = Math.hypot(target.wx - ox, ty - oy, target.wz - oz);
+      const block = sim.space.rayGround(
+        ox,
+        oy,
+        oz,
+        (target.wx - ox) / len,
+        (ty - oy) / len,
+        (target.wz - oz) / len,
+        len - 0.5,
+      );
+      if (block && !sim.space.isTrainCollider(block.collider)) return true;
+      const moving = Math.hypot(target.motor.vx, target.motor.vz) > 3;
+      const hit = sim.rng.chance(moving ? 0.45 : 0.8);
+      // A miss lands beside them.
+      const mx = hit ? 0 : sim.rng.range(-1.5, 1.5);
+      const mz = hit ? 0 : sim.rng.range(-1.5, 1.5);
+      sim.events.push({
+        ev: { e: 'zap', ox, oy, oz, tx: target.wx + mx, ty: hit ? ty : target.wy, tz: target.wz + mz },
+      });
+      if (hit) sim.damagePlayer(target, e.def.damage, e.wx, e.wz, e.id);
+      sim.enemySystem.makeNoise(ox, oz, 50);
+      return true;
+    }
+    return false;
+  }
+
   /** Ranged human AI: keep a fighting distance, strafe, and shoot (§4.6). */
   private thinkOutlaw(e: SimEnemy, players: SimPlayer[]): void {
     const sim = this.sim;
@@ -796,6 +1035,14 @@ export class EnemySystem {
       if (w <= 0 || nights < d.fromNight) continue;
       types.push(t);
       weights.push(w);
+    }
+    // Night types bring their own hunters (§4.5, §4.6).
+    if (night && sim.nightType === NightType.FullMoon) {
+      types.push('werewolf');
+      weights.push(0.22);
+    } else if (night && sim.nightType === NightType.BloodMoon) {
+      types.push('vampire');
+      weights.push(0.2);
     }
     return types.length ? sim.rng.weighted(types, weights) : 'walker';
   }

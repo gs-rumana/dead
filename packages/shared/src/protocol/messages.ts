@@ -97,7 +97,16 @@ export type GameEvent =
   | { e: 'revived'; id: string; by: string }
   | { e: 'died'; id: string }
   | { e: 'respawned'; id: string }
-  | { e: 'enemyAttack'; id: string };
+  | { e: 'enemyAttack'; id: string }
+  | { e: 'growl'; id: string; type: number }
+  /** A vampire vanishing or appearing. */
+  | { e: 'blink'; x: number; y: number; z: number }
+  | { e: 'lightning'; x: number; z: number }
+  /** Dr. Voss's arc from his coil to a target. */
+  | { e: 'zap'; ox: number; oy: number; oz: number; tx: number; ty: number; tz: number }
+  /** A landmark boss wakes (or falls). */
+  | { e: 'boss'; type: number; awake: boolean }
+  | { e: 'runEnd'; won: boolean };
 
 /** Host → client messages. */
 export interface ServerMessages {

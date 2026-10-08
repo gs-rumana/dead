@@ -60,6 +60,12 @@ export interface Outfit {
   hat?: Swatch;
   hair?: Swatch;
   bandana?: Swatch;
+  /** Werewolf: snout, ears and claws. */
+  beast?: boolean;
+  /** A cape hanging from the shoulders. */
+  cape?: Swatch;
+  /** A long coat skirt (lab coat, duster). */
+  coat?: Swatch;
 }
 
 /** Undead outfits (§5.5: the same bodies with rotting skin and torn clothes). */
@@ -81,6 +87,24 @@ export const ZOMBIE_OUTFITS: Record<'walker' | 'runner' | 'brute', Outfit> = {
     vest: 'dusterDark',
     bandana: 'bandana',
   },
+};
+
+/** Night hunters and landmark bosses (§4.6). */
+export const MONSTER_OUTFITS: Record<'werewolf' | 'vampire' | 'rancher' | 'voss' | 'countess', Outfit> = {
+  werewolf: { skin: 'fur', shirt: 'fur', pants: 'dusterDark', boots: 'furDark', vest: 'furDark', beast: true },
+  vampire: { skin: 'pale', shirt: 'black', pants: 'black', boots: 'hatDark', vest: 'velvet', hair: 'black', cape: 'black' },
+  rancher: {
+    skin: 'rot1',
+    shirt: 'shirtRed',
+    pants: 'denim',
+    boots: 'leather',
+    vest: 'leather',
+    hat: 'hat',
+    bandana: 'blood',
+    coat: 'duster',
+  },
+  voss: { skin: 'rot2', shirt: 'shirt', pants: 'dusterDark', boots: 'black', vest: 'labCoat', hair: 'white', coat: 'labCoat' },
+  countess: { skin: 'pale', shirt: 'velvet', pants: 'velvet', boots: 'black', vest: 'black', hair: 'black', cape: 'blood', coat: 'velvet' },
 };
 
 /** Outlaws (§4.6): dusters, bandanas and dark hats. */
@@ -181,6 +205,17 @@ function parts(o: Outfit): Part[] {
   P('head', o.skin, at(taper(0.17, 0.2, 0.19, 0.21, 0.23), 0, 1.69, 0.005));
   P('head', o.skin, at(new THREE.BoxGeometry(0.04, 0.06, 0.05), 0, 1.68, -0.115));
   if (o.hair) P('head', o.hair, at(new THREE.BoxGeometry(0.2, 0.08, 0.2), 0, 1.79, 0.02));
+  if (o.beast) {
+    P('head', o.skin, at(new THREE.BoxGeometry(0.1, 0.09, 0.16), 0, 1.65, -0.17));
+    P('head', 'black', at(new THREE.BoxGeometry(0.05, 0.03, 0.03), 0, 1.68, -0.255));
+    for (const x of [-1, 1])
+      P('head', o.skin, at(new THREE.ConeGeometry(0.04, 0.12, 4), x * 0.075, 1.86, 0.03));
+  }
+  if (o.cape) {
+    P('chest', o.cape, at(taper(0.42, 0.05, 0.6, 0.05, 0.95), 0, 1.04, 0.15));
+    P('neck', o.cape, at(taper(0.3, 0.06, 0.24, 0.05, 0.16), 0, 1.6, 0.09));
+  }
+  if (o.coat) P('hips', o.coat, at(taper(0.34, 0.22, 0.42, 0.27, 0.55), 0, 0.62, 0.005));
   if (o.hat) {
     P('head', o.hat, at(new THREE.CylinderGeometry(0.26, 0.26, 0.025, 10), 0, 1.79, 0));
     P('head', o.hat, at(new THREE.CylinderGeometry(0.11, 0.13, 0.14, 8), 0, 1.86, 0));
@@ -191,6 +226,8 @@ function parts(o: Outfit): Part[] {
     P(`upperArm${s}`, o.shirt, at(taper(0.085, 0.09, 0.1, 0.11, 0.3), x * 0.215, 1.31, 0));
     P(`lowerArm${s}`, o.shirt, at(taper(0.07, 0.075, 0.085, 0.09, 0.27), x * 0.235, 1.045, 0));
     P(`hand${s}`, o.skin, at(new THREE.BoxGeometry(0.06, 0.1, 0.085), x * 0.24, 0.86, -0.005));
+    if (o.beast)
+      P(`hand${s}`, 'bone', at(new THREE.BoxGeometry(0.07, 0.07, 0.02), x * 0.24, 0.79, -0.04));
     // Legs.
     P(`upperLeg${s}`, o.pants, at(taper(0.12, 0.13, 0.15, 0.16, 0.44), x * 0.1, 0.71, 0));
     P(`lowerLeg${s}`, o.pants, at(taper(0.1, 0.11, 0.12, 0.13, 0.42), x * 0.1, 0.3, 0));

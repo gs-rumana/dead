@@ -6,12 +6,14 @@ import {
   FORT_POINTS,
   ITEMS,
   type ItemKind,
+  SELL_RATE,
   type CarPose,
   type HandcarPose,
   type RunState,
   type World,
   doorPose,
   findInteractable,
+  fortGate,
   isBulky,
   pieceWorld,
   trainInteractables,
@@ -53,6 +55,7 @@ export interface Viewer {
   yaw: number;
   pitch: number;
   carryKind: string;
+  carryId: string;
 }
 
 const REACH = 3.0;
@@ -153,8 +156,9 @@ export function findTarget(
     for (const st of world.structuresNear(v.fx, v.fz, 10)) {
       if (!st.shop) continue;
       const w = pieceWorld(st, st.pieces[st.shop.piece]!);
-      const rate = st.shop.kind === 'wagon' ? 0.75 : 0.55;
-      const value = carry === 'corpse' ? 6 : def.value;
+      const rate = SELL_RATE[st.shop.kind];
+      const body = state.items.get(v.carryId)?.extra ?? 0;
+      const value = carry === 'corpse' ? ENEMIES[ENEMY_TYPES[body] ?? 'walker'].bodyValue : def.value;
       offer(
         {
           use: `shop:${st.id}`,
@@ -228,6 +232,26 @@ export function findTarget(
           },
           aimScore(v, w.x, w.y, w.z, 0.7),
         );
+      } else if (p.kind === 'lever' || p.kind === 'brazier') {
+        // Landmark puzzles (§4.6) and Fort Haven's winch (§4.1).
+        const done = state.props.get(`${st.id}:${p.id}`) === 1;
+        const w = pieceWorld(st, p);
+        const score = aimScore(v, w.x, w.y + 0.3, w.z, 0.6);
+        if (fortGate(st)?.lever === p.id) {
+          if (state.finale === 0)
+            offer({ use: '', prompt: 'Start the winch', hold: 1.5, holdUse: 'winch', holdPrompt: 'Winding the winch' }, score);
+        } else if (st.landmark?.triggers.includes(p.id) && !done) {
+          if (p.kind === 'lever') offer({ use: `lever:${st.id}:${p.id}`, prompt: 'Pull the lever', hold: 0 }, score);
+          else
+            offer(
+              { use: '', prompt: 'Light the brazier', hold: 1.0, holdUse: `brazier:${st.id}:${p.id}`, holdPrompt: 'Lighting the brazier' },
+              score,
+            );
+        }
+      } else if (p.kind === 'gate' && st.landmark?.gate === p.id && !state.props.get(`${st.id}:${p.id}`)) {
+        const w = pieceWorld(st, p);
+        const prompt = st.landmark.kind === 'ranch' ? 'Unlock the cellar door' : 'Try the iron door';
+        offer({ use: `unlock:${st.id}:${p.id}`, prompt, hold: 0 }, aimScore(v, w.x, w.y, w.z, 0.8));
       } else if (p.loot && !state.props.get(`${st.id}:${p.id}`)) {
         const w = pieceWorld(st, p);
         const what =

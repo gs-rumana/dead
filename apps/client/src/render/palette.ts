@@ -75,6 +75,11 @@ export const PALETTE = {
   rot2: '#535c3c',
   blood: '#5c0d0d',
   bone: '#d8cdb0',
+  fur: '#4d3d30',
+  furDark: '#2f2620',
+  pale: '#cfc8c4',
+  velvet: '#4a1424',
+  labCoat: '#d9d6cc',
   // Signs and paint
   white: '#e8e2d4',
   signRed: '#a33b2c',

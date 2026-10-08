@@ -20,6 +20,7 @@ export type ItemKind =
   | 'cash'
   | 'bounty'
   | 'trolley_kit'
+  | 'cellar_key'
   | 'ammo_pistol'
   | 'ammo_rifle'
   | 'ammo_shells'
@@ -85,6 +86,8 @@ export const ITEMS: Record<ItemKind, ItemDef> = {
   cash: d('cash', 'Cash', 'valuable', 0, 10),
   /** An outlaw's badge: only the sheriff pays for it (§4.6 bounties). */
   bounty: d('bounty', "Outlaw's badge", 'valuable', 0, 30),
+  /** Grayson Ranch's cellar key (§4.6 puzzle). Worthless to traders. */
+  cellar_key: d('cellar_key', 'Cellar key', 'valuable', 0, 0),
   /** A cargo trolley for the handcar (§4.4): bought or found, hitched at a junction. */
   trolley_kit: d('trolley_kit', 'Trolley', 'bulky', 0, 30, { carrySpeed: 0.6 }),
   ammo_pistol: d('ammo_pistol', 'Pistol rounds', 'ammo', 0, 6, { rounds: 12 }),

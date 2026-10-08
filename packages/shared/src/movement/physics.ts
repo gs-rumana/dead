@@ -255,7 +255,7 @@ export class PhysicsSpace {
       const c = this.ground.createCollider(desc);
       colliders.push(c);
       pos.push(w);
-      if (p.kind === 'door' || p.kind === 'board') {
+      if (p.kind === 'door' || p.kind === 'board' || p.kind === 'gate') {
         const key = `${st.id}:${p.id}`;
         this.pieces.set(key, { collider: c, st, piece: p, state: 0 });
         this.applyPiece(key, this.pieceStates.get(key) ?? 0);
@@ -274,7 +274,8 @@ export class PhysicsSpace {
     if (!e) return;
     e.state = state;
     const { st, piece } = e;
-    if (piece.kind === 'board') {
+    if (piece.kind === 'board' || piece.kind === 'gate') {
+      // Broken boards and a raised gate stop blocking.
       e.collider.setEnabled(state === 0);
       return;
     }

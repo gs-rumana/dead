@@ -81,7 +81,7 @@ export function App({ onStart }: Props) {
     };
     return (
       <>
-        <Hud onMenu={() => setPaused(true)} />
+        <Hud onMenu={() => setPaused(true)} onLeave={leave} />
         {paused && (
           <PauseMenu
             game={game}
