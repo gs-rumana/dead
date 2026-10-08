@@ -196,6 +196,11 @@ export function Hud({ onMenu }: { onMenu: () => void }) {
           )}
         </div>
       )}
+      {hud.handcarSpeed >= 0 && (
+        <div class="carrying" data-testid="handcar-hud">
+          Handcar · {Math.round(hud.handcarSpeed)} km/h · stamina {Math.round(hud.stamina)}
+        </div>
+      )}
       {hud.carrying && (
         <div class="carrying" data-testid="carrying">
           Carrying {hud.carrying} · <kbd>{hud.touch ? 'Drop' : 'G'}</kbd> drop

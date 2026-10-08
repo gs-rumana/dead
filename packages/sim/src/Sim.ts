@@ -24,6 +24,12 @@ import {
   SIM_DT,
   World,
   type ItemKind,
+  HANDCAR,
+  HANDCAR_SEATS,
+  type HandcarPose,
+  handcarPose,
+  handcarToWorld,
+  makeHandcarPose,
   SURVIVAL,
   TRAIN_LENGTH,
   Terrain,
@@ -42,6 +48,7 @@ import { EnemySystem, type SimEnemy } from './ai/EnemySystem.ts';
 import { Combat } from './combat/Combat.ts';
 import { type Inventory, addToHotbar, starterInventory } from './combat/inventory.ts';
 import { ItemSystem } from './items/ItemSystem.ts';
+import { HandcarSim } from './vehicles/HandcarSim.ts';
 import { TrainSim } from './train.ts';
 
 export interface SimOptions {
@@ -108,6 +115,9 @@ export class Sim {
   readonly enemySystem: EnemySystem;
   readonly combat: Combat;
   readonly items: ItemSystem;
+  /** One handcar per spur, waiting on the siding at its junction (§4.4). */
+  readonly handcars: HandcarSim[];
+  readonly handcarPoses: HandcarPose[];
   tick = 0;
   time = 0;
   /** Night type for the current cycle (§4.5). M6 rolls the full set. */
@@ -138,6 +148,8 @@ export class Sim {
     this.enemySystem = new EnemySystem(this);
     this.combat = new Combat(this);
     this.items = new ItemSystem(this);
+    this.handcars = this.world.spurs.map((spur, i) => new HandcarSim(i, spur));
+    this.handcarPoses = this.handcars.map((h) => handcarPose(h.spur, h.s, makeHandcarPose()));
     this.updateTrainPose();
   }
 
@@ -222,6 +234,7 @@ export class Sim {
   removePlayer(id: string): void {
     const p = this.players.get(id);
     if (p?.carry) this.items.drop(p, false);
+    if (p && p.motor.frame >= Frame.Handcar) this.leaveHandcar(p);
     if (this.train.driver === id) this.train.driver = '';
     this.players.delete(id);
   }
@@ -279,14 +292,18 @@ export class Sim {
         this.heal(p);
         break;
       case 'use':
-        if (typeof cmd.target === 'string') this.items.use(p, cmd.target.slice(0, 64), !!cmd.hold);
+        if (typeof cmd.target === 'string') {
+          const target = cmd.target.slice(0, 64);
+          if (target.startsWith('handcar:')) this.useHandcar(p, Number(target.slice(8)));
+          else this.items.use(p, target, !!cmd.hold);
+        }
         break;
       case 'drop':
         this.items.drop(p, !!cmd.throw);
         break;
       case 'buy':
         if (typeof cmd.shop === 'string' && typeof cmd.kind === 'string')
-          this.items.buy(p, cmd.shop, cmd.kind as ItemKind);
+          this.items.buy(p, cmd.shop, cmd.kind as ItemKind | 'heal');
         break;
       case 'sell':
         if (typeof cmd.shop === 'string') this.items.sell(p, cmd.shop, Number(cmd.slot) | 0);
@@ -384,6 +401,31 @@ export class Sim {
       case 'cash':
         p.inv.cash += value || 100;
         break;
+      case 'handcar': {
+        // Stand next to a junction's handcar.
+        const pose = this.handcarPoses[value | 0];
+        if (pose) this.devTeleport(p, pose.x + pose.rx * 1.8, NaN, pose.z + pose.rz * 1.8);
+        break;
+      }
+      case 'town': {
+        const spur = this.world.spurs[value | 0];
+        if (spur) {
+          const f = spur.frameAt(spur.end, {
+            x: 0,
+            y: 0,
+            z: 0,
+            heading: 0,
+            grade: 0,
+            tx: 0,
+            ty: 0,
+            tz: 0,
+            rx: 0,
+            rz: 0,
+          });
+          this.devTeleport(p, f.x + Math.sin(f.heading) * 25, NaN, f.z - Math.cos(f.heading) * 25);
+        }
+        break;
+      }
       case 'spawn': {
         // Spawn a pack in front of the player.
         const yaw = p.motor.yaw + (p.motor.frame === Frame.Train ? this.poses[0]!.yaw : 0);
@@ -502,6 +544,7 @@ export class Sim {
     }
     this.train.step(dt, this.route);
     this.updateTrainPose();
+    this.stepHandcars(dt);
     this.resolveTrainContacts();
     for (const p of this.players.values()) this.updatePlayerWorld(p);
 
@@ -526,6 +569,86 @@ export class Sim {
     this.space.streamTiles(pts);
   }
 
+  private stepHandcars(dt: number): void {
+    this.handcars.forEach((hc, i) => {
+      const inputs: Array<{ seat: number; input: InputFrame | null; stamina: number }> = [];
+      hc.seats.forEach((id, seat) => {
+        const p = id ? this.players.get(id) : undefined;
+        if (!p) {
+          hc.seats[seat] = '';
+          return;
+        }
+        inputs.push({
+          seat,
+          input: p.connected && p.life === Life.Alive ? p.lastInput : null,
+          stamina: p.motor.stamina,
+        });
+      });
+      const spent = hc.step(dt, inputs);
+      hc.seats.forEach((id, seat) => {
+        const p = id ? this.players.get(id) : undefined;
+        if (!p) return;
+        p.motor.stamina = Math.max(0, p.motor.stamina - (spent[seat] ?? 0));
+        // Keep riders in their seats.
+        const seatPos = HANDCAR_SEATS[seat]!;
+        p.motor.x = seatPos.x;
+        p.motor.y = HANDCAR.deck;
+        p.motor.z = seatPos.z;
+      });
+      handcarPose(hc.spur, hc.s, this.handcarPoses[i]!);
+    });
+  }
+
+  /** Sit on a handcar (§4.4), or load cargo / hitch a trolley if carrying. */
+  useHandcar(p: SimPlayer, i: number): void {
+    const hc = this.handcars[i];
+    const pose = this.handcarPoses[i];
+    if (!hc || !pose || p.life !== Life.Alive) return;
+    if (Math.hypot(pose.x - p.wx, pose.z - p.wz) > 4) return;
+    if (p.carry) {
+      this.items.loadHandcar(p, i);
+      return;
+    }
+    const seat = hc.freeSeat();
+    if (seat < 0) {
+      this.toast(p.id, 'The handcar is full');
+      return;
+    }
+    hc.seats[seat] = p.id;
+    const m = p.motor;
+    m.frame = Frame.Handcar + i;
+    m.x = HANDCAR_SEATS[seat]!.x;
+    m.y = HANDCAR.deck;
+    m.z = HANDCAR_SEATS[seat]!.z;
+    m.vx = m.vy = m.vz = 0;
+    m.mantle = 0;
+    this.updatePlayerWorld(p);
+  }
+
+  /** Step off a handcar to the side of the seat. */
+  leaveHandcar(p: SimPlayer): void {
+    const m = p.motor;
+    const i = m.frame - Frame.Handcar;
+    const hc = this.handcars[i];
+    const pose = this.handcarPoses[i];
+    if (!hc || !pose) return;
+    const seat = hc.seats.indexOf(p.id);
+    if (seat >= 0) hc.seats[seat] = '';
+    const side = (HANDCAR_SEATS[seat] ?? HANDCAR_SEATS[0]!).x > 0 ? 1 : -1;
+    const w = handcarToWorld(pose, side * 1.6, 0, HANDCAR_SEATS[seat]?.z ?? 0, {
+      x: 0,
+      y: 0,
+      z: 0,
+    });
+    m.frame = Frame.World;
+    m.x = w.x;
+    m.z = w.z;
+    m.y = this.terrain.height(w.x, w.z) + 0.05;
+    m.vx = m.vy = m.vz = 0;
+    this.space.streamTiles([{ x: m.x, z: m.z }]);
+    this.updatePlayerWorld(p);
+  }
+
   private updateTrainPose(): void {
     computeCarPoses(this.route, this.train.s, this.poses);
     const front = this.poses[0] as CarPose;
@@ -536,6 +659,16 @@ export class Sim {
 
   private updatePlayerWorld(p: SimPlayer): void {
     const m = p.motor;
+    if (m.frame >= Frame.Handcar) {
+      const pose = this.handcarPoses[m.frame - Frame.Handcar];
+      if (pose) {
+        const w = handcarToWorld(pose, m.x, m.y, m.z, { x: 0, y: 0, z: 0 });
+        p.wx = w.x;
+        p.wy = w.y;
+        p.wz = w.z;
+      }
+      return;
+    }
     if (m.frame === Frame.World) {
       p.wx = m.x;
       p.wy = m.y;
@@ -587,6 +720,10 @@ export class Sim {
 
   private interact(p: SimPlayer, input: InputFrame): void {
     const m = p.motor;
+    if (m.frame >= Frame.Handcar) {
+      this.leaveHandcar(p);
+      return;
+    }
     if (m.driving) {
       m.driving = false;
       if (this.train.driver === p.id) this.train.driver = '';
@@ -628,6 +765,7 @@ export class Sim {
 
   private down(p: SimPlayer): void {
     if (p.carry) this.items.drop(p, false);
+    if (p.motor.frame >= Frame.Handcar) this.leaveHandcar(p);
     p.hp = 0;
     p.life = Life.Downed;
     p.bleed = SURVIVAL.bleedOut;
@@ -763,6 +901,14 @@ export class Sim {
     e.anim = Anim.Dead;
     e.vx = e.vz = 0;
     e.climb = null;
+    if (e.type === 'outlaw') {
+      // Outlaws carry a bounty: their badge pays at any sheriff (§4.6).
+      this.items.spawn('bounty', Frame.World, e.wx, e.wy + 0.5, e.wz, 0, { flying: true });
+      if (this.rng.chance(0.6))
+        this.items.spawn('ammo_rifle', Frame.World, e.wx + 0.4, e.wy + 0.5, e.wz, 0, {
+          flying: true,
+        });
+    }
     if (byTrain) {
       e.gore |= 0x1f & (1 << Math.floor(this.rng.next() * 5));
       this.events.push({

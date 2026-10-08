@@ -34,6 +34,8 @@ export class TrackStreamer {
     private readonly worldRoot: THREE.Group,
     private readonly route: Route,
     private distance: number,
+    /** Telegraph poles and km posts only line the main line. */
+    private readonly decor = true,
   ) {
     const mat = paletteMaterial();
     this.sleepers = new THREE.InstancedMesh(buildSleeper(), mat, 3000);
@@ -187,7 +189,11 @@ export class TrackStreamer {
         m.compose(p.set(f.x - originX, f.y + 0.16, f.z - originZ), q, one);
         this.sleepers.setMatrixAt(ns++, m);
       }
-      for (let s = Math.ceil(s0 / POLE_SPACING) * POLE_SPACING; s < s0 + CHUNK; s += POLE_SPACING) {
+      for (
+        let s = Math.ceil(s0 / POLE_SPACING) * POLE_SPACING;
+        this.decor && s < s0 + CHUNK;
+        s += POLE_SPACING
+      ) {
         if (np >= this.poles.instanceMatrix.count) break;
         this.route.frameAt(s, f);
         q.setFromAxisAngle(up, -f.heading);
@@ -195,7 +201,7 @@ export class TrackStreamer {
         this.poles.setMatrixAt(np++, m);
       }
       const km = WORLD.metersPerKm;
-      for (let s = Math.ceil(s0 / km) * km; s < s0 + CHUNK; s += km) {
+      for (let s = Math.ceil(s0 / km) * km; this.decor && s < s0 + CHUNK; s += km) {
         if (nk >= this.posts.instanceMatrix.count || s < 0) break;
         this.route.frameAt(s, f);
         q.setFromAxisAngle(up, -f.heading + Math.PI / 2);

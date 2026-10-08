@@ -133,6 +133,7 @@ function place(
     const n = terrain.route.nearest(x, z, CLEARANCE[kind] + 1);
     if (n) return null;
   }
+  if (terrain.nearestSpur(x, z, CLEARANCE[kind] * 0.7 + 1)) return null;
   const h2 = hashInts(seed, gx, gz, slot + 100);
   return {
     kind,

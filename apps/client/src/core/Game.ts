@@ -16,6 +16,7 @@ import {
   Terrain,
   World,
   ITEMS,
+  handcarToWorld,
   pieceWorld,
   type ItemKind,
   WORLD,
@@ -46,6 +47,7 @@ import { TrainView } from '../gameplay/TrainView.ts';
 import { TerrainStreamer } from '../world/TerrainStreamer.ts';
 import { StructureView } from '../world/StructureView.ts';
 import { ItemView } from '../gameplay/ItemView.ts';
+import { HandcarView } from '../gameplay/HandcarView.ts';
 import { type Target, findTarget } from '../gameplay/Interactions.ts';
 import { TrackStreamer } from '../world/TrackStreamer.ts';
 import { hud, toast } from '../ui/hudStore.ts';
@@ -84,6 +86,8 @@ export class Game {
   private route!: Route;
   private terrain!: Terrain;
   private structureView!: StructureView;
+  private handcarView!: HandcarView;
+  private spurStreamers: TrackStreamer[] = [];
   private itemView!: ItemView;
   /** What E would act on right now. */
   target: Target | null = null;
@@ -187,7 +191,13 @@ export class Game {
     this.scene.add(this.selfBody.mesh);
     this.features = this.world.features;
     this.structureView = new StructureView(this.worldRoot, this.world);
+    this.handcarView = new HandcarView(this.scene, this.world);
+    this.remotes.handcarPose = (i) => this.handcarView.pose(i);
+    this.spurStreamers = this.world.spurs.map(
+      (spur) => new TrackStreamer(this.worldRoot, spur, 260, false),
+    );
     this.itemView = new ItemView(this.scene);
+    this.itemView.handcarPose = (i) => this.handcarView?.pose(i) ?? null;
     this.enemyView = new EnemyView(this.scene, this.terrain);
     this.effects = new Effects(this.scene);
     this.effects.gore = this.settings.gore;
@@ -632,6 +642,7 @@ export class Game {
             this.world,
             this.itemView,
             this.trainView.poses,
+            (i) => this.handcarView.pose(i),
           )
         : null;
     const held = this.input.sampleHeld();
@@ -774,7 +785,15 @@ export class Game {
     let wy = ly;
     let wz = lz;
     let bodyYaw = this.lookYaw;
-    if (m.frame === Frame.Train) {
+    if (m.frame >= Frame.Handcar) {
+      const hp = this.handcarView.pose(m.frame - Frame.Handcar);
+      if (hp) {
+        handcarToWorld(hp, m.x, m.y, m.z, this.tmpW);
+        wx = this.tmpW.x;
+        wy = this.tmpW.y;
+        wz = this.tmpW.z;
+      }
+    } else if (m.frame === Frame.Train) {
       trainToWorld(this.trainView.poses, lx, ly, lz, this.tmpW);
       wx = this.tmpW.x;
       wy = this.tmpW.y;
@@ -813,14 +832,16 @@ export class Game {
     this.effects.shake = Math.max(0, this.effects.shake - dt * 2);
     const sx = (Math.random() - 0.5) * shakeAmt;
     const sy = (Math.random() - 0.5) * shakeAmt;
+    // Handcar riders: the camera works in world space around the seat.
+    const seated = m.frame >= Frame.Handcar;
     this.rig.update(
       dt,
       firstPerson ? 'first' : 'third',
       aim,
-      m.frame,
-      lx,
-      ly,
-      lz,
+      seated ? Frame.World : m.frame,
+      seated ? wx : lx,
+      seated ? wy : ly,
+      seated ? wz : lz,
       this.lookYaw + sx,
       this.lookPitch + this.weapons.kick + sy,
       this.trainView.poses,
@@ -877,6 +898,11 @@ export class Game {
     this.terrainStreamer.update(cam.x, cam.z, this.originX, this.originZ);
     const near = this.route.nearest(cam.x, cam.z, 400);
     this.trackStreamer.update(near ? near.s : trainS, this.originX, this.originZ);
+    this.world.spurs.forEach((spur, i) => {
+      const n = spur.nearest(cam.x, cam.z, 420);
+      this.spurStreamers[i]!.update(n ? n.s : -1e6, this.originX, this.originZ);
+    });
+    this.handcarView.update(dt, this.conn.state, this.originX, this.originZ);
     if (m.frame === Frame.World) this.space.streamTiles([{ x: m.x, z: m.z }]);
 
     this.updateAudio(m.frame === Frame.Train, trainS);
@@ -1057,7 +1083,11 @@ export class Game {
     hud.driving = m.driving;
     hud.onTrain = m.frame === Frame.Train;
     hud.inCab = hud.onTrain && m.z > CONSIST[0]!.zc + 2.4 && m.z < CONSIST[0]!.z1 + 0.5;
-    hud.stamina = m.stamina;
+    // The host's stamina includes handcar pumping, which prediction doesn't model.
+    hud.stamina =
+      m.frame >= Frame.Handcar
+        ? (st.players.get(this.conn.selfId)?.stamina ?? m.stamina)
+        : m.stamina;
     const me = st.players.get(this.conn.selfId);
     hud.hp = me?.hp ?? 100;
     hud.dayPhase = st.dayPhase;
@@ -1065,7 +1095,12 @@ export class Game {
     hud.night = this.sky.night;
     hud.pointerLocked = this.input.pointerLocked;
     if (m.driving) hud.prompt = 'Leave the controls';
-    else {
+    else if (m.frame >= Frame.Handcar) {
+      const hs = st.handcars[m.frame - Frame.Handcar];
+      hud.prompt = 'Get off the handcar';
+      hud.holdHint = hud.touch ? 'stick to pump' : 'hold W/S to pump · Space brakes';
+      hud.handcarSpeed = Math.abs(hs?.speed ?? 0) * 3.6;
+    } else {
       const tg = this.target;
       hud.prompt = tg
         ? tg.hold > 0 && !tg.use
@@ -1074,6 +1109,7 @@ export class Game {
         : '';
       hud.holdHint = tg?.holdUse && tg.use ? `hold: ${tg.holdPrompt}` : '';
     }
+    if (m.frame < Frame.Handcar) hud.handcarSpeed = -1;
     const meCarry = me?.carryKind as ItemKind | undefined;
     hud.carrying = meCarry ? (ITEMS[meCarry]?.name ?? '') : '';
     if (m.frame === Frame.World) {

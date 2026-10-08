@@ -136,6 +136,42 @@ export class StructureView {
           b.pop();
           break;
         }
+        case 'fire': {
+          // Ring of stones, logs and a glowing heart.
+          for (let i = 0; i < 7; i++) {
+            const a = (i / 7) * Math.PI * 2;
+            b.blob(
+              'rock',
+              p.x + Math.cos(a) * 0.55,
+              0.1,
+              p.z + Math.sin(a) * 0.55,
+              0.16,
+              0.12,
+              0.14,
+            );
+          }
+          b.box('woodDark', p.x, 0.12, p.z, 0.9, 0.12, 0.14, { ry: 0.6 });
+          b.box('woodDark', p.x, 0.16, p.z, 0.9, 0.12, 0.14, { ry: -0.6 });
+          const flame = new THREE.Mesh(new THREE.ConeGeometry(0.3, 0.6, 6), glowMaterial(0xff9a3a));
+          flame.position.set(p.x, 0.4, p.z);
+          group.add(flame);
+          lamps.push(flame);
+          break;
+        }
+        case 'tent':
+          b.push(p.x, 0, p.z, { ry: p.ry });
+          b.prism(
+            sw,
+            [
+              [-p.hx, 0],
+              [p.hx, 0],
+              [0, p.hy * 2],
+            ],
+            p.hz * 2,
+          );
+          b.box('woodDark', 0, p.hy, -p.hz, 0.05, p.hy * 2, 0.05);
+          b.pop();
+          break;
         case 'tank':
           b.cylinder(sw, p.x, p.y, p.z, p.hx, p.hx, p.hy * 2, 12);
           b.cylinder('iron', p.x, p.y + p.hy * 0.6, p.z, p.hx + 0.03, p.hx + 0.03, 0.06, 12);

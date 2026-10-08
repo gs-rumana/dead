@@ -7,6 +7,7 @@ import {
   ENEMY_TYPES,
   EnemyState,
   FORT_POINTS,
+  HandcarState,
   InventoryState,
   ItemState,
   PROTOCOL_VERSION,
@@ -365,6 +366,20 @@ export class RunHost {
       const f = sim.items.forts[i] ?? 0;
       if (state.forts[i] !== f) state.forts[i] = f;
     }
+    sim.handcars.forEach((hc, i) => {
+      let hs = state.handcars[i];
+      if (!hs) {
+        hs = new HandcarState();
+        for (let k = 0; k < 4; k++) hs.seats.push('');
+        state.handcars.push(hs);
+      }
+      if (hs.s !== hc.s) hs.s = hc.s;
+      if (hs.speed !== hc.speed) hs.speed = hc.speed;
+      hc.seats.forEach((id, k) => {
+        if (hs!.seats[k] !== id) hs!.seats[k] = id;
+      });
+      if (hs.trolley !== hc.trolley) hs.trolley = hc.trolley;
+    });
   }
 
   private writeProjectiles(): void {

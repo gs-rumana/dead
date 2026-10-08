@@ -1,4 +1,6 @@
 import * as THREE from 'three/webgpu';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { weaponModel } from './models/weapons.ts';
 import {
   BONES,
   BONE_PART,
@@ -145,12 +147,124 @@ function poseZombie(b: Bones, clip: ClipName, t: number): void {
   }
 }
 
-const cache = new Map<Outfit, VatAsset>();
+/** Living people (outlaws, townsfolk): a normal gait and a rifle-aiming "attack". */
+function poseHuman(b: Bones, clip: ClipName, t: number): void {
+  for (const n of BONES) b[n].rotation.set(0, 0, 0);
+  b.hips.position.set(0, 0.95, 0);
+  const s = Math.sin(t * Math.PI * 2);
+  const c = Math.cos(t * Math.PI * 2);
+  const carry = () => {
+    // Rifle held across the body.
+    b.upperArmR.rotation.set(-0.5, 0, 0.15);
+    b.lowerArmR.rotation.set(-0.9, 0, 0);
+    b.upperArmL.rotation.set(-0.7, 0, -0.3);
+    b.lowerArmL.rotation.set(-1.1, 0, 0);
+  };
+  switch (clip) {
+    case 'idle':
+      carry();
+      b.chest.rotation.x = s * 0.02;
+      break;
+    case 'walk':
+      carry();
+      b.upperLegL.rotation.x = s * 0.5;
+      b.upperLegR.rotation.x = -s * 0.5;
+      b.lowerLegL.rotation.x = Math.max(0, -c) * 0.8 + 0.05;
+      b.lowerLegR.rotation.x = Math.max(0, c) * 0.8 + 0.05;
+      b.hips.position.y = 0.95 - Math.abs(c) * 0.03;
+      break;
+    case 'run':
+      carry();
+      b.upperLegL.rotation.x = s * 0.8;
+      b.upperLegR.rotation.x = -s * 0.8;
+      b.lowerLegL.rotation.x = Math.max(0, -c) * 1.3 + 0.1;
+      b.lowerLegR.rotation.x = Math.max(0, c) * 1.3 + 0.1;
+      b.spine.rotation.x = 0.25;
+      b.hips.position.y = 0.92 - Math.abs(c) * 0.06;
+      break;
+    case 'attack': {
+      // Shouldered rifle, a small recoil kick early in the clip.
+      const kick = t < 0.2 ? (0.2 - t) * 1.2 : 0;
+      b.upperArmR.rotation.set(-1.45 - kick, 0, 0.25);
+      b.lowerArmR.rotation.set(-0.35, 0, 0);
+      b.upperArmL.rotation.set(-1.5 - kick, 0, -0.55);
+      b.lowerArmL.rotation.set(-0.15, 0, 0);
+      b.head.rotation.x = 0.1;
+      b.spine.rotation.y = -0.15;
+      break;
+    }
+    case 'dead': {
+      const k = Math.min(1, t * 1.6);
+      const ease = k * k * (3 - 2 * k);
+      b.hips.rotation.x = ease * 1.45;
+      b.hips.position.y = 0.95 - ease * 0.74;
+      b.hips.position.z = -ease * 0.5;
+      b.upperArmL.rotation.z = -ease * 1.4;
+      b.upperArmR.rotation.z = ease * 1.2;
+      b.lowerLegL.rotation.x = 0.5 * (1 - ease);
+      break;
+    }
+    case 'climb':
+      b.upperArmL.rotation.x = -2.6 + s * 0.3;
+      b.upperArmR.rotation.x = -2.6 - s * 0.3;
+      b.upperLegL.rotation.x = -0.8 + s * 0.6;
+      b.upperLegR.rotation.x = -0.8 - s * 0.6;
+      b.lowerLegL.rotation.x = 1.2;
+      b.lowerLegR.rotation.x = 1.2;
+      break;
+    case 'crouch':
+      carry();
+      b.hips.position.y = 0.6;
+      b.upperLegL.rotation.x = -1.4;
+      b.upperLegR.rotation.x = -1.1;
+      b.lowerLegL.rotation.x = 2.2;
+      b.lowerLegR.rotation.x = 1.9;
+      b.spine.rotation.x = 0.4;
+      break;
+  }
+}
 
-export function bakeVat(outfit: Outfit): VatAsset {
-  const hit = cache.get(outfit);
+export type VatStyle = 'zombie' | 'human';
+
+const cache = new Map<string, VatAsset>();
+const outfitIds = new Map<Outfit, number>();
+
+/** Bakes an outfit's clips; humans can hold a weapon (skinned to the right hand). */
+export function bakeVat(outfit: Outfit, style: VatStyle = 'zombie', held = ''): VatAsset {
+  if (!outfitIds.has(outfit)) outfitIds.set(outfit, outfitIds.size);
+  const key = `${outfitIds.get(outfit)}:${style}:${held}`;
+  const hit = cache.get(key);
   if (hit) return hit;
-  const source = buildHumanoidGeometry(outfit);
+  const pose = style === 'human' ? poseHuman : poseZombie;
+  let source = buildHumanoidGeometry(outfit);
+  const model = held ? weaponModel(held) : null;
+  if (model) {
+    // Bind the weapon to the right hand in the bind pose (same mapping as Humanoid.setHeld).
+    const g = model.geometry.clone();
+    const basis = new THREE.Matrix4().makeBasis(
+      new THREE.Vector3(-1, 0, 0),
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0, 1, 0),
+    );
+    g.applyMatrix4(basis);
+    g.translate(0.24, 0.92 - 0.07, 0.01);
+    const n = g.getAttribute('position').count;
+    const si = new Uint16Array(n * 4);
+    const sw = new Float32Array(n * 4);
+    const hand = BONES.indexOf('handR');
+    for (let i = 0; i < n; i++) {
+      si[i * 4] = hand;
+      sw[i * 4] = 1;
+    }
+    g.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4));
+    g.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
+    for (const name of Object.keys(g.attributes))
+      if (!source.hasAttribute(name)) g.deleteAttribute(name);
+    for (const name of Object.keys(source.attributes))
+      if (!g.hasAttribute(name)) source.deleteAttribute(name);
+    const merged = mergeGeometries([source, g], false);
+    if (merged) source = merged;
+  }
   const pos = source.getAttribute('position') as THREE.BufferAttribute;
   const skin = source.getAttribute('skinIndex') as THREE.BufferAttribute;
   const n = pos.count;
@@ -172,7 +286,7 @@ export function bakeVat(outfit: Outfit): VatAsset {
     const clip = clips[name];
     for (let f = 0; f < frames; f++) {
       const t = clip.loop ? f / frames : f / (frames - 1);
-      poseZombie(bones, name, t);
+      pose(bones, name, t);
       root.updateMatrixWorld(true);
       BONES.forEach((bn, i) =>
         boneMats[i]!.multiplyMatrices(bones[bn].matrixWorld, skeleton.boneInverses[i]!),
@@ -204,6 +318,6 @@ export function bakeVat(outfit: Outfit): VatAsset {
   geometry.setAttribute('part', new THREE.BufferAttribute(part, 1));
   geometry.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 1, 0), 2);
   const asset: VatAsset = { geometry, texture, clips, vertexCount: n, frameCount: total };
-  cache.set(outfit, asset);
+  cache.set(key, asset);
   return asset;
 }

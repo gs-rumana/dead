@@ -6,6 +6,9 @@ import {
   FORT,
   FORT_POINTS,
   Frame,
+  HANDCAR,
+  HANDCAR_SLOTS,
+  handcarToWorld,
   ITEMS,
   type ItemKind,
   LOOT,
@@ -14,6 +17,8 @@ import {
   PLATFORM_TOP,
   type Piece,
   SELL_RATE,
+  DOCTOR_HEAL_PRICE,
+  sellPrice,
   type Structure,
   TRAIN,
   WEAPONS,
@@ -161,6 +166,16 @@ export class ItemSystem {
   }
 
   private updateWorld(it: SimItem): void {
+    if (it.frame >= Frame.Handcar) {
+      const pose = this.sim.handcarPoses[it.frame - Frame.Handcar];
+      if (pose) {
+        const w = handcarToWorld(pose, it.x, it.y, it.z, { x: 0, y: 0, z: 0 });
+        it.wx = w.x;
+        it.wy = w.y;
+        it.wz = w.z;
+      }
+      return;
+    }
     if (it.frame === Frame.World) {
       it.wx = it.x;
       it.wy = it.y;
@@ -374,10 +389,12 @@ export class ItemSystem {
     const m = p.motor;
     const fx = -Math.sin(m.yaw);
     const fz = -Math.cos(m.yaw);
-    it.frame = m.frame;
-    it.x = m.x + fx * 0.7;
-    it.y = m.y + (throwIt ? 1.3 : 0.9);
-    it.z = m.z + fz * 0.7;
+    // Seated players drop things into the world beside them.
+    const onHandcar = m.frame >= Frame.Handcar;
+    it.frame = onHandcar ? Frame.World : m.frame;
+    it.x = (onHandcar ? p.wx : m.x) + fx * 0.7;
+    it.y = (onHandcar ? p.wy : m.y) + (throwIt ? 1.3 : 0.9);
+    it.z = (onHandcar ? p.wz : m.z) + fz * 0.7;
     const speed = throwIt ? 7.5 : 1;
     it.vx = fx * speed + (m.frame === Frame.World ? m.vx : 0);
     it.vy = throwIt ? 3 : 0;
@@ -417,8 +434,57 @@ export class ItemSystem {
     it.flying = false;
   }
 
+  /** Load the carried item onto a handcar slot, or hitch a trolley (§4.4). */
+  loadHandcar(p: SimPlayer, i: number): void {
+    const it = p.carry ? this.items.get(p.carry) : undefined;
+    const hc = this.sim.handcars[i];
+    if (!it || !hc) return;
+    if (it.kind === 'trolley_kit') {
+      if (hc.trolley) {
+        this.sim.toast(p.id, 'This handcar already has a trolley');
+        return;
+      }
+      hc.trolley = true;
+      this.remove(it.id);
+      this.sim.toast(p.id, 'Trolley hitched: two more cargo spaces');
+      return;
+    }
+    const frame = Frame.Handcar + i;
+    const max = HANDCAR.slots + (hc.trolley ? HANDCAR.trolleySlots : 0);
+    let slot = -1;
+    for (let k = 0; k < max; k++) {
+      let taken = false;
+      for (const o of this.items.values())
+        if (o.frame === frame && o.slot === k && !o.holder) taken = true;
+      if (!taken) {
+        slot = k;
+        break;
+      }
+    }
+    if (slot < 0) {
+      this.sim.toast(
+        p.id,
+        hc.trolley
+          ? 'The handcar and trolley are full'
+          : 'The handcar is full; a trolley would hold more',
+      );
+      return;
+    }
+    const pos = HANDCAR_SLOTS[slot]!;
+    this.clearCarry(p);
+    it.holder = '';
+    it.frame = frame;
+    it.slot = slot;
+    it.x = pos.x;
+    it.y = HANDCAR.deck;
+    it.z = pos.z;
+    it.yaw = 0;
+    it.flying = false;
+  }
+
   slotTaken(i: number): boolean {
-    for (const it of this.items.values()) if (it.slot === i && !it.holder) return true;
+    for (const it of this.items.values())
+      if (it.slot === i && it.frame === Frame.Train && !it.holder) return true;
     return false;
   }
 
@@ -560,8 +626,20 @@ export class ItemSystem {
     return this.near(p, w.x, w.y, w.z, 5) ? st : null;
   }
 
-  buy(p: SimPlayer, stId: string, kind: ItemKind): void {
+  buy(p: SimPlayer, stId: string, kind: ItemKind | 'heal'): void {
     const st = this.shopNear(p, stId);
+    if (kind === 'heal') {
+      // The doctor patches you up (§4.4).
+      if (st?.shop?.kind !== 'doctor' || p.hp >= 100) return;
+      if (p.inv.cash < DOCTOR_HEAL_PRICE) {
+        this.sim.toast(p.id, 'Not enough cash');
+        return;
+      }
+      p.inv.cash -= DOCTOR_HEAL_PRICE;
+      p.hp = 100;
+      this.sim.toast(p.id, 'The doctor patches you up');
+      return;
+    }
     const line = st?.shop?.stock.find((l) => l.kind === kind);
     if (!st || !line) return;
     if (p.inv.cash < line.price) {
@@ -576,7 +654,9 @@ export class ItemSystem {
       const local =
         st.kind === 'wagon'
           ? { x: counter.x - counter.hx - 1.5, y: 0.3, z: -1.5 + (n % 4) * 1.0 }
-          : { x: 4.7, y: PLATFORM_TOP + 0.3, z: 2.2 + (n % 4) * 1.1 };
+          : st.kind === 'town'
+            ? { x: counter.x - 3.2, y: counter.y - counter.hy + 0.3, z: ((n % 3) - 1) * 1.0 }
+            : { x: 4.7, y: PLATFORM_TOP + 0.3, z: 2.2 + (n % 4) * 1.1 };
       const w = pieceWorld(st, local as Piece);
       this.spawn(kind, Frame.World, w.x, w.y, w.z, st.yaw, { flying: true });
       this.sim.toast(p.id, `${ITEMS[kind].name} is waiting outside`);
@@ -588,17 +668,24 @@ export class ItemSystem {
   sell(p: SimPlayer, stId: string, packIndex: number): void {
     const st = this.shopNear(p, stId);
     if (!st?.shop) return;
-    const rate = SELL_RATE[st.shop.kind];
+    const shop = st.shop.kind;
     const sellOne = (i: number) => {
       const kind = p.inv.pack[i] as ItemKind | undefined;
       if (!kind) return 0;
+      const price = sellPrice(shop, kind);
+      if (price <= 0) return 0;
       p.inv.pack.splice(i, 1);
-      return Math.round(ITEMS[kind].value * rate);
+      return price;
     };
     let total = 0;
     if (packIndex < 0) {
-      while (p.inv.pack.length) total += sellOne(p.inv.pack.length - 1);
+      for (let i = p.inv.pack.length - 1; i >= 0; i--) total += sellOne(i);
     } else total += sellOne(packIndex);
+    if (!total)
+      this.sim.toast(
+        p.id,
+        shop === 'sheriff' ? 'The sheriff only pays for bounties' : 'Nothing here they want',
+      );
     p.inv.cash += total;
     if (total) this.sim.toast(p.id, `Sold for $${total}`);
   }
@@ -610,6 +697,7 @@ export class ItemSystem {
     const value =
       it.kind === 'corpse' && it.body ? ENEMIES[it.body].bodyValue : ITEMS[it.kind].value;
     const price = Math.round(value * SELL_RATE[st.shop.kind]);
+    if (price <= 0) return;
     p.inv.cash += price;
     this.remove(it.id);
     this.sim.toast(p.id, `Sold ${ITEMS[it.kind].name} for $${price}`);
@@ -630,6 +718,20 @@ export class ItemSystem {
       0,
       { amount: n, flying: true },
     );
+  }
+
+  /** An enemy on the train shoves a nearby piece of cargo off the side (§4.3). */
+  knockCargo(x: number, z: number): void {
+    for (const it of this.items.values()) {
+      if (it.frame !== Frame.Train || it.holder || Math.hypot(it.x - x, it.z - z) > 4) continue;
+      it.slot = -1;
+      it.flying = true;
+      const side = it.x >= 0 ? 1 : -1;
+      it.vx = side * 3.5;
+      it.vy = 2.5;
+      it.vz = 0;
+      return;
+    }
   }
 
   /** A dead enemy becomes a body to burn, sell or search (§4.3, §4.10). */

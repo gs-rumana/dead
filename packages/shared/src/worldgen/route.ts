@@ -42,6 +42,19 @@ export interface NearestResult {
   dist: number;
 }
 
+/** A spur line's layout (§4.4): where it leaves the main line and how it curves. */
+export interface SpurSpec {
+  index: number;
+  length: number;
+  /** Pose at s = 0. */
+  x0: number;
+  z0: number;
+  h0: number;
+  /** Elevation at s = 0 (matches the main line). */
+  y0: number;
+  pieces: Array<{ len: number; k0: number; k1: number }>;
+}
+
 export const ROUTE_START = -250;
 export const ROUTE_END = ROUTE_LENGTH + 400;
 
@@ -58,8 +71,10 @@ const PROGRESS_CELL = 256;
  */
 export class Route {
   readonly seed: number;
-  readonly start = ROUTE_START;
-  readonly end = ROUTE_END;
+  readonly start: number;
+  readonly end: number;
+  /** Set for spur lines; undefined for the main line. */
+  readonly spur: SpurSpec | undefined;
   private readonly pieces: CurvePiece[] = [];
   /** x, z every TABLE_STEP metres. */
   private readonly px: Float64Array;
@@ -73,16 +88,57 @@ export class Route {
   private progressW = 0;
   private progressH = 0;
 
-  constructor(seed: number) {
+  constructor(seed: number, spur?: SpurSpec) {
     this.seed = seed >>> 0;
-    this.buildCurvature();
+    this.spur = spur;
+    this.start = spur ? 0 : ROUTE_START;
+    this.end = spur ? spur.length : ROUTE_END;
+    if (spur) {
+      let s = 0;
+      let heading = spur.h0;
+      for (const p of spur.pieces) {
+        this.pieces.push({ s0: s, s1: s + p.len, k0: p.k0, k1: p.k1, h0: heading });
+        heading += ((p.k0 + p.k1) / 2) * p.len;
+        s += p.len;
+      }
+    } else this.buildCurvature();
     const n = Math.ceil((this.end - this.start) / TABLE_STEP) + 1;
     this.px = new Float64Array(n);
     this.pz = new Float64Array(n);
     this.integrate();
-    this.elev = this.buildElevation();
+    this.elev = spur ? this.buildSpurElevation(spur) : this.buildElevation();
     this.buildIndex();
-    this.buildProgressField();
+    if (!spur) this.buildProgressField();
+  }
+
+  /** Spurs follow the land more closely (handcars climb), starting level with the main line. */
+  private buildSpurElevation(spur: SpurSpec): Float64Array {
+    const n = Math.ceil((this.end - this.start) / ELEV_STEP) + 1;
+    const out = new Float64Array(n);
+    const p = { x: 0, z: 0 };
+    const raw = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      this.xzAt(i * ELEV_STEP, p);
+      raw[i] = Route.landHeight(this.seed, p.x, p.z);
+    }
+    const r = 16;
+    for (let i = 0; i < n; i++) {
+      let acc = 0;
+      let c = 0;
+      for (let j = Math.max(0, i - r); j <= Math.min(n - 1, i + r); j++) {
+        acc += raw[j] as number;
+        c++;
+      }
+      const t = clamp((i * ELEV_STEP - 40) / 160, 0, 1);
+      const w = t * t * (3 - 2 * t);
+      out[i] = spur.y0 + (acc / c - spur.y0) * w;
+    }
+    const maxRise = 0.03 * ELEV_STEP;
+    for (let i = 1; i < n; i++) {
+      const prev = out[i - 1] as number;
+      out[i] = clamp(out[i] as number, prev - maxRise, prev + maxRise);
+    }
+    return out;
   }
 
   /** Large-scale land height used by both the track profile and the terrain. */
@@ -164,10 +220,10 @@ export class Route {
 
   private integrate(): void {
     const d = { x: 0, z: 0 };
-    // s = 0 sits at the world origin.
+    // s = 0 sits at the world origin (main line) or the junction (spurs).
     const i0 = Math.round((0 - this.start) / TABLE_STEP);
-    this.px[i0] = 0;
-    this.pz[i0] = 0;
+    this.px[i0] = this.spur?.x0 ?? 0;
+    this.pz[i0] = this.spur?.z0 ?? 0;
     for (let i = i0 + 1; i < this.px.length; i++) {
       const sA = this.start + (i - 1) * TABLE_STEP;
       this.integrateStep(sA, sA + TABLE_STEP, d);
@@ -254,6 +310,23 @@ export class Route {
       out.z += -Math.cos(h) * (s - sc);
     }
     return out;
+  }
+
+  /** Horizontal bounding box of the centreline (for quick rejection). */
+  bounds(): { minX: number; maxX: number; minZ: number; maxZ: number } {
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minZ = Infinity;
+    let maxZ = -Infinity;
+    for (let i = 0; i < this.px.length; i += 4) {
+      const x = this.px[i] as number;
+      const z = this.pz[i] as number;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (z < minZ) minZ = z;
+      if (z > maxZ) maxZ = z;
+    }
+    return { minX, maxX, minZ, maxZ };
   }
 
   /** Track bed height (top of ballast) at s, C1-smooth. */

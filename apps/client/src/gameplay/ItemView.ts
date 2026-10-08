@@ -3,9 +3,11 @@ import {
   type CarPose,
   ENEMY_TYPES,
   Frame,
+  type HandcarPose,
   ITEMS,
   type ItemKind,
   type RunState,
+  handcarToWorld,
   trainToWorld,
   trainYawAt,
 } from '@dead-tracks/shared';
@@ -82,6 +84,9 @@ export class ItemView {
     return t ? { x: t.wx, y: t.wy, z: t.wz } : null;
   }
 
+  /** Handcar poses for cargo (set by the game). */
+  handcarPose: (i: number) => HandcarPose | null = () => null;
+
   update(
     dt: number,
     state: RunState,
@@ -116,6 +121,14 @@ export class ItemView {
         ty = h.y + 0.75;
         tz = h.z - Math.cos(h.yaw) * 0.55;
         yaw = h.yaw;
+      } else if (it.frame >= Frame.Handcar) {
+        const hp = this.handcarPose(it.frame - Frame.Handcar);
+        if (!hp) return;
+        handcarToWorld(hp, it.x, it.y, it.z, this.tmp);
+        tx = this.tmp.x;
+        ty = this.tmp.y;
+        tz = this.tmp.z;
+        yaw += hp.yaw;
       } else if (it.frame === Frame.Train) {
         trainToWorld(poses, it.x, it.y, it.z, this.tmp);
         tx = this.tmp.x;
@@ -128,7 +141,7 @@ export class ItemView {
         tz = it.z;
       }
       // Riding or carried items snap; loose ones ease toward the latest position.
-      if (!t.init || carried || it.frame === Frame.Train) {
+      if (!t.init || carried || it.frame !== Frame.World) {
         t.wx = tx;
         t.wy = ty;
         t.wz = tz;

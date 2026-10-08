@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
-import { ITEMS, type ItemKind, SELL_RATE } from '@dead-tracks/shared';
+import { DOCTOR_HEAL_PRICE, ITEMS, type ItemKind, SELL_RATE, sellPrice } from '@dead-tracks/shared';
 import type { Game } from '../core/Game.ts';
 
 /** Station store and merchant wagon (§4.4, §4.10): buy supplies, sell valuables. */
@@ -26,9 +26,29 @@ export function ShopPanel({ game }: { game: Game }) {
       onClick={(e) => e.target === e.currentTarget && close()}
     >
       <div class="panel shop">
-        <h2>{st.kind === 'wagon' ? 'Merchant wagon' : `${st.name} store`}</h2>
+        <h2>
+          {st.kind === 'wagon'
+            ? 'Merchant wagon'
+            : st.kind === 'town'
+              ? st.name
+              : `${st.name} store`}
+        </h2>
         <div class="cash">Cash: ${cash}</div>
-        <h3>Buy</h3>
+        {st.shop.kind === 'doctor' && (
+          <div class="shop-row">
+            <span>Patch me up (full health)</span>
+            <button
+              disabled={cash < DOCTOR_HEAL_PRICE}
+              onClick={() => game.conn.send('cmd', { t: 'buy', shop: st.id, kind: 'heal' })}
+            >
+              ${DOCTOR_HEAL_PRICE}
+            </button>
+          </div>
+        )}
+        {st.shop.kind === 'sheriff' && (
+          <p class="muted">The sheriff pays ${ITEMS.bounty.value} for every outlaw's badge.</p>
+        )}
+        {st.shop.stock.length > 0 && <h3>Buy</h3>}
         {st.shop.stock.map((line) => (
           <div class="shop-row" key={line.kind}>
             <span>{ITEMS[line.kind].name}</span>
@@ -48,9 +68,10 @@ export function ShopPanel({ game }: { game: Game }) {
             <span>{ITEMS[kind as ItemKind]?.name ?? kind}</span>
             <button
               class="secondary"
+              disabled={sellPrice(st.shop!.kind, kind as ItemKind) <= 0}
               onClick={() => game.conn.send('cmd', { t: 'sell', shop: st.id, slot: i })}
             >
-              ${Math.round((ITEMS[kind as ItemKind]?.value ?? 0) * rate)}
+              ${sellPrice(st.shop!.kind, kind as ItemKind)}
             </button>
           </div>
         ))}

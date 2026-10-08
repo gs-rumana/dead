@@ -4,8 +4,12 @@ import {
   type Structure,
   buildHomestead,
   buildStation,
+  buildTown,
+  buildCamp,
   buildWagon,
+  planCamps,
   planStructures,
+  spurSpec,
   toWorld,
 } from './structures.ts';
 import { Terrain } from './terrain.ts';
@@ -21,6 +25,8 @@ export class World {
   readonly terrain: Terrain;
   readonly features: Feature[];
   readonly structures: Structure[] = [];
+  /** Spur lines to the towns (§4.4), one per junction, in junction order. */
+  readonly spurs: Route[] = [];
   private readonly byTile = new Map<string, Structure[]>();
   private readonly byId = new Map<string, Structure>();
 
@@ -33,12 +39,26 @@ export class World {
       if (f.kind === 'station' || f.kind === 'start')
         this.structures.push(buildStation(this.route, f, `s${n++}`));
     }
+    // Spurs and their towns.
+    this.features
+      .filter((f) => f.kind === 'junction')
+      .forEach((f, i) => {
+        const spur = new Route(seed, spurSpec(this.route, f, i));
+        this.spurs.push(spur);
+        this.structures.push(...buildTown(spur, i, f.name));
+      });
+    this.terrain.setSpurs(this.spurs);
     const plan = planStructures(this.route, this.features);
     for (const h of plan.homesteadSpots) {
       const y = this.terrain.natural(h.x, h.z, h.s);
       this.structures.push(buildHomestead(this.route, seed, h.idx, h.x, y, h.z, h.yaw, h.s));
     }
     plan.wagonS.forEach((s, i) => this.structures.push(buildWagon(this.route, seed, i, s)));
+    planCamps(this.route, this.features).forEach((s, i) => {
+      const camp = buildCamp(this.route, seed, i, s);
+      camp.y = this.terrain.natural(camp.x, camp.z, s);
+      this.structures.push(camp);
+    });
     this.terrain.setPads(
       this.structures
         .filter((s) => s.pad > 0)

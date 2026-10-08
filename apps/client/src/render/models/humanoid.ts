@@ -83,6 +83,18 @@ export const ZOMBIE_OUTFITS: Record<'walker' | 'runner' | 'brute', Outfit> = {
   },
 };
 
+/** Outlaws (§4.6): dusters, bandanas and dark hats. */
+export const OUTLAW_OUTFIT: Outfit = {
+  skin: 'skin2',
+  shirt: 'shirt',
+  pants: 'dusterDark',
+  boots: 'hatDark',
+  vest: 'duster',
+  hat: 'hatDark',
+  hair: 'hair',
+  bandana: 'bandana',
+};
+
 export const OUTFITS: Outfit[] = [
   {
     skin: 'skin2',

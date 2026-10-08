@@ -12,7 +12,7 @@ import {
   trainToWorld,
   trainYawAt,
 } from '@dead-tracks/shared';
-import { ZOMBIE_OUTFITS } from '../render/models/humanoid.ts';
+import { OUTLAW_OUTFIT, ZOMBIE_OUTFITS } from '../render/models/humanoid.ts';
 import { type ClipName, type VatAsset, bakeVat } from '../render/vat.ts';
 import { type VatInstances, createVatInstances } from '../render/vatMaterial.ts';
 import { INTERP_DELAY } from './RemotePlayers.ts';
@@ -61,11 +61,13 @@ const ANIM_CLIP: Record<number, ClipName> = {
 };
 
 /** Which baked body each enemy type uses until its own art lands. */
-const BODY: Record<EnemyType, 'walker' | 'runner' | 'brute'> = {
+type Body = 'walker' | 'runner' | 'brute' | 'outlaw';
+
+const BODY: Record<EnemyType, Body> = {
   walker: 'walker',
   runner: 'runner',
   brute: 'brute',
-  outlaw: 'walker',
+  outlaw: 'outlaw',
   werewolf: 'runner',
   vampire: 'runner',
 };
@@ -76,19 +78,19 @@ const BODY: Record<EnemyType, 'walker' | 'runner' | 'brute'> = {
  */
 export class EnemyView {
   private readonly enemies = new Map<string, Rendered>();
-  private readonly bodies = new Map<
-    'walker' | 'runner' | 'brute',
-    { asset: VatAsset; inst: VatInstances }
-  >();
+  private readonly bodies = new Map<Body, { asset: VatAsset; inst: VatInstances }>();
   private readonly w = { x: 0, y: 0, z: 0 };
 
   constructor(
     private readonly scene: THREE.Scene,
     private readonly terrain: Terrain,
   ) {
-    for (const body of ['walker', 'runner', 'brute'] as const) {
-      const asset = bakeVat(ZOMBIE_OUTFITS[body]);
-      const inst = createVatInstances(asset, 96);
+    for (const body of ['walker', 'runner', 'brute', 'outlaw'] as const) {
+      const asset =
+        body === 'outlaw'
+          ? bakeVat(OUTLAW_OUTFIT, 'human', 'rifle')
+          : bakeVat(ZOMBIE_OUTFITS[body]);
+      const inst = createVatInstances(asset, body === 'outlaw' ? 24 : 96);
       scene.add(inst.mesh);
       this.bodies.set(body, { asset, inst });
     }
@@ -170,7 +172,7 @@ export class EnemyView {
 
   update(dt: number, now: number, poses: CarPose[], ox: number, oz: number, night: number): void {
     const t = now - INTERP_DELAY;
-    const counts = new Map<string, number>();
+    const counts = new Map<Body, number>();
     for (const r of this.enemies.values()) {
       const buf = r.buf;
       if (buf.length === 0) continue;

@@ -25,7 +25,8 @@ import {
 } from '@dead-tracks/shared';
 import type { Sim, SimPlayer } from '../Sim.ts';
 
-export type AiState = 'wander' | 'alerted' | 'chase' | 'attack' | 'board' | 'ambush' | 'dead';
+export type AiState =
+  'wander' | 'alerted' | 'chase' | 'attack' | 'board' | 'ambush' | 'raid' | 'guard' | 'dead';
 
 const HISTORY = 20;
 
@@ -64,6 +65,9 @@ export interface SimEnemy {
   nearest: number;
   /** Pressed against the train hull this tick (climb over it when slow). */
   blocked: boolean;
+  /** Outlaws: the camp they guard. */
+  homeX: number;
+  homeZ: number;
 }
 
 interface Obstacle {
@@ -89,6 +93,9 @@ export class EnemySystem {
   private readonly frame = makeFrame();
   /** Development: stop the director spawning. */
   paused = false;
+  private raidAcc = 0;
+  /** Camps whose guards have been spawned this day. */
+  private readonly campDay = new Map<string, number>();
 
   constructor(private readonly sim: Sim) {}
 
@@ -134,6 +141,8 @@ export class EnemySystem {
       wz: z,
       nearest: 0,
       blocked: false,
+      homeX: x,
+      homeZ: z,
     };
     this.enemies.set(e.id, e);
     this.updateWorldPos(e);
@@ -185,7 +194,9 @@ export class EnemySystem {
         }
         continue;
       }
-      if (nearest > DIRECTOR.despawn && e.frame === Frame.World) {
+      // Raiders gathering at a parked train stay even with everyone far away (§4.3).
+      const raiding = e.state === 'raid' || e.state === 'ambush' || e.frame === Frame.Train;
+      if (nearest > DIRECTOR.despawn && e.frame === Frame.World && !raiding) {
         this.enemies.delete(e.id);
         continue;
       }
@@ -288,6 +299,28 @@ export class EnemySystem {
     e.attackT = Math.max(0, e.attackT - dt);
     e.stateT -= dt;
     if (e.climb) return;
+    if (e.type === 'outlaw') {
+      this.thinkOutlaw(e, players);
+      return;
+    }
+    if (e.state === 'raid') {
+      // Heading for the parked train (§4.3): climb aboard and wait.
+      const target = this.pickTarget(e, players);
+      if (target) {
+        e.state = 'chase';
+        e.target = target.id;
+      } else {
+        if (Math.hypot(e.goalX - e.x, e.goalZ - e.z) < 2.5 || e.blocked) this.tryBoard(e);
+        return;
+      }
+    }
+    if (e.state === 'ambush' && e.frame === Frame.Train) {
+      // Knock cargo off now and then while nobody is around.
+      if (e.stateT <= 0) {
+        e.stateT = sim.rng.range(10, 18);
+        sim.items.knockCargo(e.x, e.z);
+      }
+    }
     const target = this.pickTarget(e, players);
     if (target) {
       e.target = target.id;
@@ -421,6 +454,10 @@ export class EnemySystem {
         e.y = c.ty;
         e.z = c.tz;
         e.climb = null;
+        if (e.state === 'raid' || !e.target) {
+          e.state = 'ambush';
+          e.stateT = this.sim.rng.range(6, 14);
+        }
       }
       return;
     }
@@ -571,6 +608,8 @@ export class EnemySystem {
   /** Spawn director (§4.6): a budget from distance, time of day, party size and noise. */
   private direct(dt: number, players: SimPlayer[]): void {
     if (this.paused) return;
+    this.raidParkedTrain(dt, players);
+    this.guardCamps(players);
     const sim = this.sim;
     const alive = players.filter((p) => p.life === 0 && p.connected);
     if (alive.length === 0) return;
@@ -596,6 +635,144 @@ export class EnemySystem {
         e.stateT = 20;
       }
     }
+  }
+
+  /**
+   * The parked train (§4.3): with everyone away from a stopped train, the undead
+   * gather, climb aboard and wait. Lighter for small parties.
+   */
+  private raidParkedTrain(dt: number, players: SimPlayer[]): void {
+    const sim = this.sim;
+    if (Math.abs(sim.train.speed) > 1) return;
+    const loco = sim.poses[1]!;
+    const away = players.every(
+      (p) => p.life !== 0 || !p.connected || Math.hypot(p.wx - loco.cx, p.wz - loco.cz) > 70,
+    );
+    if (!away || players.length === 0) return;
+    this.raidAcc += dt;
+    if (this.raidAcc < 4) return;
+    this.raidAcc = 0;
+    let near = 0;
+    for (const e of this.enemies.values()) {
+      if (e.state !== 'dead' && Math.hypot(e.wx - loco.cx, e.wz - loco.cz) < 60) near++;
+    }
+    const cap = players.length <= 1 ? 3 : players.length === 2 ? 5 : 8;
+    if (near >= cap) return;
+    const a = sim.rng.range(0, Math.PI * 2);
+    const d = sim.rng.range(35, 55);
+    const e = this.spawn(
+      sim.rng.chance(0.25) ? 'runner' : 'walker',
+      loco.cx + Math.cos(a) * d,
+      loco.cz + Math.sin(a) * d,
+    );
+    e.state = 'raid';
+    const side = sim.rng.chance(0.5) ? 1 : -1;
+    trainToWorld(sim.poses, side * 2.0, 0, sim.rng.range(4, TRAIN_LENGTH - 2), this.tmp);
+    e.goalX = this.tmp.x;
+    e.goalZ = this.tmp.z;
+  }
+
+  /** Outlaws guard their camps by day (§4.6); once per day per camp. */
+  private guardCamps(players: SimPlayer[]): void {
+    const sim = this.sim;
+    if (sim.isNight) return;
+    for (const p of players) {
+      for (const st of sim.world.structuresNear(p.wx, p.wz, 130)) {
+        if (st.kind !== 'camp' || this.campDay.get(st.id) === sim.day) continue;
+        this.campDay.set(st.id, sim.day);
+        const n = 3 + Math.floor(sim.rng.next() * 3);
+        for (let i = 0; i < n; i++) {
+          const a = (i / n) * Math.PI * 2;
+          const e = this.spawn('outlaw', st.x + Math.cos(a) * 4, st.z + Math.sin(a) * 4);
+          e.state = 'guard';
+          e.homeX = st.x;
+          e.homeZ = st.z;
+        }
+      }
+    }
+  }
+
+  /** Ranged human AI: keep a fighting distance, strafe, and shoot (§4.6). */
+  private thinkOutlaw(e: SimEnemy, players: SimPlayer[]): void {
+    const sim = this.sim;
+    let target: SimPlayer | null = null;
+    let best = e.state === 'chase' ? 85 : e.def.sight;
+    for (const p of players) {
+      if (p.life !== 0 || !p.connected) continue;
+      const d = Math.hypot(p.wx - e.wx, p.wz - e.wz);
+      if (d < best) {
+        best = d;
+        target = p;
+      }
+    }
+    if (!target) {
+      e.target = null;
+      e.state = 'guard';
+      e.goalX = e.homeX + Math.sin(sim.time * 0.1 + Number(e.id)) * 5;
+      e.goalZ = e.homeZ + Math.cos(sim.time * 0.1 + Number(e.id)) * 5;
+      return;
+    }
+    e.state = 'chase';
+    e.target = target.id;
+    const dx = target.wx - e.wx;
+    const dz = target.wz - e.wz;
+    const d = Math.hypot(dx, dz) || 1;
+    // Hold 15–30 m: back off when close, close in when far, strafe in between.
+    const strafe = Math.sin(sim.time * 0.7 + Number(e.id)) > 0 ? 1 : -1;
+    let gx = e.x;
+    let gz = e.z;
+    if (d < 13) {
+      gx -= (dx / d) * 6;
+      gz -= (dz / d) * 6;
+    } else if (d > 32) {
+      gx += (dx / d) * 6;
+      gz += (dz / d) * 6;
+    } else {
+      gx += (-dz / d) * strafe * 4;
+      gz += (dx / d) * strafe * 4;
+    }
+    e.goalX = gx;
+    e.goalZ = gz;
+    e.yaw = Math.atan2(-dx, -dz);
+    if (e.attackT > 0 || d > 70) return;
+    e.attackT = e.def.attackInterval * sim.rng.range(0.8, 1.3);
+    e.anim = Anim.Attack;
+    // Line of sight from the rifle to the target.
+    const ox = e.wx;
+    const oy = e.wy + 1.5;
+    const oz = e.wz;
+    const tx = target.wx;
+    const ty = target.wy + 1.2;
+    const tz = target.wz;
+    const len = Math.hypot(tx - ox, ty - oy, tz - oz);
+    const block = sim.space.rayGround(
+      ox,
+      oy,
+      oz,
+      (tx - ox) / len,
+      (ty - oy) / len,
+      (tz - oz) / len,
+      len - 0.5,
+    );
+    const blocked = !!block && !sim.space.isTrainCollider(block.collider);
+    sim.events.push({
+      ev: {
+        e: 'shot',
+        by: `e${e.id}`,
+        w: 'rifle',
+        ox,
+        oy,
+        oz,
+        dx: (tx - ox) / len,
+        dy: (ty - oy) / len,
+        dz: (tz - oz) / len,
+      },
+    });
+    sim.enemySystem.makeNoise(ox, oz, 60);
+    const moving = Math.hypot(target.motor.vx, target.motor.vz) > 3 ? 0.6 : 1;
+    const chance = Math.max(0.08, 0.62 - d / 110) * moving;
+    if (!blocked && sim.rng.chance(chance))
+      sim.damagePlayer(target, e.def.damage, e.wx, e.wz, e.id);
   }
 
   budget(partySize: number): number {

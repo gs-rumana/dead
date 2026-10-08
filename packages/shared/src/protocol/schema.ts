@@ -160,6 +160,18 @@ export const ProjectileState = schema(
 );
 export type ProjectileState = SchemaType<typeof ProjectileState>;
 
+/** A handcar on its spur (§4.4). */
+export const HandcarState = schema(
+  {
+    s: t.float32(),
+    speed: t.float32(),
+    seats: t.array('string'),
+    trolley: t.boolean(),
+  },
+  'HandcarState',
+);
+export type HandcarState = SchemaType<typeof HandcarState>;
+
 /** An item in the world, on the train or in someone's hands (§4.8). */
 export const ItemState = schema(
   {
@@ -214,6 +226,7 @@ export const RunState = schema(
     props: t.map('uint8'),
     /** Fortification per point: 0 none, 1 plate, 2 wire (§4.3). */
     forts: t.array('uint8'),
+    handcars: t.array(HandcarState),
     projectiles: t.map(ProjectileState),
     /** Night type for this cycle (§4.5): 0 clear, 1 full moon, 2 blood moon, 3 storm, 4 fog. */
     night: t.uint8(),

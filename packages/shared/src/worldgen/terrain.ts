@@ -23,9 +23,18 @@ export interface TerrainPad {
 const PAD_CELL = 256;
 const PAD_BLEND = 14;
 
+/** Spur beds are narrower than the main line's. */
+const SPUR_HALF_WIDTH = 2.4;
+const SPUR_BLEND = 22;
+
 export class Terrain {
   readonly seed: number;
   private readonly pads = new Map<number, TerrainPad[]>();
+  private spurs: Array<{
+    route: Route;
+    b: { minX: number; maxX: number; minZ: number; maxZ: number };
+  }> = [];
+  private readonly spurNear: NearestResult = { s: 0, lateral: 0, dist: 0 };
   private readonly near: NearestResult = { s: 0, lateral: 0, dist: 0 };
   private readonly w: [number, number, number] = [1, 0, 0];
 
@@ -66,6 +75,29 @@ export class Terrain {
     return h;
   }
 
+  /** Registers spur lines so their beds are flattened too (§4.4). */
+  setSpurs(spurs: Route[]): void {
+    const m = SPUR_HALF_WIDTH + SPUR_BLEND + 2;
+    this.spurs = spurs.map((route) => {
+      const b = route.bounds();
+      return {
+        route,
+        b: { minX: b.minX - m, maxX: b.maxX + m, minZ: b.minZ - m, maxZ: b.maxZ + m },
+      };
+    });
+  }
+
+  /** Nearest spur within `max` metres, if any. */
+  nearestSpur(x: number, z: number, max: number): { route: Route; near: NearestResult } | null {
+    let best: { route: Route; near: NearestResult } | null = null;
+    for (const sp of this.spurs) {
+      if (x < sp.b.minX || x > sp.b.maxX || z < sp.b.minZ || z > sp.b.maxZ) continue;
+      const n = sp.route.nearest(x, z, max, this.spurNear);
+      if (n && (!best || n.dist < best.near.dist)) best = { route: sp.route, near: { ...n } };
+    }
+    return best;
+  }
+
   /** Registers flat ground under structures; call once before sampling heights. */
   setPads(pads: TerrainPad[]): void {
     this.pads.clear();
@@ -95,6 +127,14 @@ export class Terrain {
       const nat = this.natural(x, z, n.s);
       const t = smoothstep(BED_HALF_WIDTH, BED_HALF_WIDTH + BED_BLEND, n.dist);
       h = bed + (nat - bed) * t;
+    }
+    if (this.spurs.length) {
+      const sp = this.nearestSpur(x, z, SPUR_HALF_WIDTH + SPUR_BLEND);
+      if (sp) {
+        const bed = sp.route.heightAt(sp.near.s);
+        h =
+          bed + (h - bed) * smoothstep(SPUR_HALF_WIDTH, SPUR_HALF_WIDTH + SPUR_BLEND, sp.near.dist);
+      }
     }
     if (this.pads.size === 0) return h;
     const list = this.pads.get(Math.floor(x / PAD_CELL) * 100003 + Math.floor(z / PAD_CELL));

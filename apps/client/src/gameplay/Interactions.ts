@@ -7,6 +7,7 @@ import {
   ITEMS,
   type ItemKind,
   type CarPose,
+  type HandcarPose,
   type RunState,
   type World,
   doorPose,
@@ -76,6 +77,7 @@ export function findTarget(
   world: World,
   items: ItemView,
   poses: CarPose[],
+  handcar: (i: number) => HandcarPose | null = () => null,
 ): Target | null {
   const carry = v.carryKind as ItemKind | '';
   let best: Target | null = null;
@@ -87,6 +89,20 @@ export function findTarget(
     }
   };
   const tmp = { x: 0, y: 0, z: 0 };
+
+  // Handcars (§4.4): ride, load cargo, hitch a trolley.
+  world.spurs.forEach((_spur, i) => {
+    const hp = handcar(i);
+    const hs = state.handcars[i];
+    if (!hp || !hs) return;
+    const riders = hs.seats.toArray().filter((x) => x).length;
+    let prompt: string;
+    if (carry === 'trolley_kit') prompt = hs.trolley ? '' : 'Hitch the trolley';
+    else if (carry) prompt = 'Load it onto the handcar';
+    else prompt = riders >= 4 ? '' : `Ride the handcar (${riders}/4)`;
+    if (prompt)
+      offer({ use: `handcar:${i}`, prompt, hold: 0 }, aimScore(v, hp.x, hp.y + 0.9, hp.z, 1.4));
+  });
 
   if (carry) {
     const def = ITEMS[carry];

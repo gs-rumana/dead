@@ -145,7 +145,8 @@ export function toWorldFrame(ctx: MotorContext, st: MotorState): void {
 
 /** Converts an input's yaw to the frame the motor is in (they differ right after a switch). */
 function inputYaw(ctx: MotorContext, st: MotorState, input: InputFrame): number {
-  if (input.frame === st.frame) return input.yaw;
+  // Handcar riders look in world terms; only train space has its own yaw.
+  if ((input.frame === Frame.Train) === (st.frame === Frame.Train)) return input.yaw;
   const off = trainYawAt(ctx.poses, st.frame === Frame.Train ? st.z : 0);
   return st.frame === Frame.Train ? input.yaw - off : input.yaw + off;
 }
@@ -157,7 +158,8 @@ export function stepMotor(ctx: MotorContext, st: MotorState, input: InputFrame, 
   st.yaw = inputYaw(ctx, st, input);
   st.pitch = clamp(input.pitch, -1.5, 1.5);
 
-  if (st.driving) {
+  if (st.driving || st.frame >= Frame.Handcar) {
+    // At the locomotive's controls or seated on a handcar: the host places us.
     st.vx = st.vy = st.vz = 0;
     st.grounded = true;
     st.sprinting = false;

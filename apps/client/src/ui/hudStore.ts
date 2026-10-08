@@ -48,6 +48,8 @@ export const hud = {
   enemies: 0,
   // Interaction and economy (§4.8, §4.10)
   holdProgress: 0,
+  /** km/h while riding a handcar, -1 otherwise. */
+  handcarSpeed: -1,
   holdHint: '',
   carrying: '',
   shop: '',

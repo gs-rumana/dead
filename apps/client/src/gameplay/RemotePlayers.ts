@@ -2,7 +2,9 @@ import * as THREE from 'three/webgpu';
 import {
   type CarPose,
   Frame,
+  type HandcarPose,
   PlayerFlag,
+  handcarToWorld,
   type RunState,
   lerpAngle,
   trainToWorld,
@@ -95,6 +97,9 @@ export class RemotePlayers {
     }
   }
 
+  /** Handcar poses for riders (set by the game). */
+  handcarPose: (i: number) => HandcarPose | null = () => null;
+
   update(dt: number, now: number, poses: CarPose[], ox: number, oz: number): void {
     const t = now - INTERP_DELAY;
     for (const r of this.remotes.values()) {
@@ -121,7 +126,15 @@ export class RemotePlayers {
       let wx = x;
       let wy = y;
       let wz = z;
-      if (src.frame === Frame.Train) {
+      if (src.frame >= Frame.Handcar) {
+        const hp = this.handcarPose(src.frame - Frame.Handcar);
+        if (hp) {
+          handcarToWorld(hp, x, y, z, this.w);
+          wx = this.w.x;
+          wy = this.w.y;
+          wz = this.w.z;
+        }
+      } else if (src.frame === Frame.Train) {
         trainToWorld(poses, x, y, z, this.w);
         wx = this.w.x;
         wy = this.w.y;

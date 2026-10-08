@@ -18,6 +18,8 @@ export type ItemKind =
   | 'silver_watch'
   | 'jewelry'
   | 'cash'
+  | 'bounty'
+  | 'trolley_kit'
   | 'ammo_pistol'
   | 'ammo_rifle'
   | 'ammo_shells'
@@ -81,6 +83,10 @@ export const ITEMS: Record<ItemKind, ItemDef> = {
   silver_watch: d('silver_watch', 'Silver watch', 'valuable', 0, 12),
   jewelry: d('jewelry', 'Jewelry', 'valuable', 0, 24),
   cash: d('cash', 'Cash', 'valuable', 0, 10),
+  /** An outlaw's badge: only the sheriff pays for it (§4.6 bounties). */
+  bounty: d('bounty', "Outlaw's badge", 'valuable', 0, 30),
+  /** A cargo trolley for the handcar (§4.4): bought or found, hitched at a junction. */
+  trolley_kit: d('trolley_kit', 'Trolley', 'bulky', 0, 30, { carrySpeed: 0.6 }),
   ammo_pistol: d('ammo_pistol', 'Pistol rounds', 'ammo', 0, 6, { rounds: 12 }),
   ammo_rifle: d('ammo_rifle', 'Rifle rounds', 'ammo', 0, 10, { rounds: 8 }),
   ammo_shells: d('ammo_shells', 'Shotgun shells', 'ammo', 0, 8, { rounds: 6 }),
@@ -101,8 +107,25 @@ export function isBulky(kind: ItemKind): boolean {
   return ITEMS[kind]?.cls === 'bulky';
 }
 
+export type ShopKind =
+  'station' | 'wagon' | 'gunsmith' | 'doctor' | 'general' | 'trading' | 'sheriff';
+
 /** What each kind of shop pays, as a fraction of trading-post value (§4.4, §4.10). */
-export const SELL_RATE = { station: 0.55, wagon: 0.75, trading: 1 } as const;
+export const SELL_RATE: Record<ShopKind, number> = {
+  station: 0.55,
+  wagon: 0.75,
+  gunsmith: 0.6,
+  doctor: 0.5,
+  general: 0.6,
+  trading: 1,
+  sheriff: 0,
+};
+
+/** Who buys what: bounties only at the sheriff (§4.6), everything else anywhere that trades. */
+export function sellPrice(shop: ShopKind, kind: ItemKind): number {
+  if (kind === 'bounty') return shop === 'sheriff' ? ITEMS.bounty.value : 0;
+  return Math.round(ITEMS[kind].value * SELL_RATE[shop]);
+}
 
 export interface StockLine {
   kind: ItemKind;
@@ -119,6 +142,39 @@ export const STATION_STOCK: StockLine[] = [
   { kind: 'wire', price: 14 },
   { kind: 'dynamite', price: 20 },
 ];
+
+/** Town shops (§4.4). */
+export const TOWN_STOCK: Record<
+  'gunsmith' | 'doctor' | 'general' | 'trading' | 'sheriff',
+  StockLine[]
+> = {
+  gunsmith: [
+    { kind: 'revolver', price: 35 },
+    { kind: 'rifle', price: 65 },
+    { kind: 'coachgun', price: 55 },
+    { kind: 'ammo_pistol', price: 7 },
+    { kind: 'ammo_rifle', price: 11 },
+    { kind: 'ammo_shells', price: 9 },
+    { kind: 'dynamite', price: 18 },
+  ],
+  doctor: [
+    { kind: 'bandage', price: 8 },
+    { kind: 'tonic', price: 22 },
+  ],
+  general: [
+    { kind: 'coal', price: 8 },
+    { kind: 'plate', price: 20 },
+    { kind: 'wire', price: 12 },
+    { kind: 'holywater', price: 16 },
+    { kind: 'hatchet', price: 9 },
+    { kind: 'trolley_kit', price: 45 },
+  ],
+  trading: [],
+  sheriff: [],
+};
+
+/** The doctor patches you up to full health for a fee (§4.4). */
+export const DOCTOR_HEAL_PRICE = 15;
 
 /** The merchant wagon rolls a few lines from this list (§4.4). */
 export const WAGON_POOL: StockLine[] = [
@@ -164,6 +220,14 @@ export const LOOT = {
     ['', 5],
     ['bandage', 1],
     ['gold_nugget', 1],
+  ],
+  outlaw: [['bounty', 10]],
+  saloon: [
+    ['cash', 4],
+    ['gold_nugget', 2],
+    ['silver_watch', 2],
+    ['jewelry', 1],
+    ['ammo_pistol', 2],
   ],
   shelf: [
     ['ammo_pistol', 2],

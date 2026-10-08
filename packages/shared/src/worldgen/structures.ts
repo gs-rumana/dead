@@ -2,7 +2,9 @@ import {
   type ItemKind,
   type LootTable,
   STATION_STOCK,
+  type ShopKind,
   type StockLine,
+  TOWN_STOCK,
   WAGON_POOL,
 } from '../data/items.ts';
 import { ROUTE_LENGTH } from '../data/world.ts';
@@ -10,7 +12,7 @@ import { Rng, hashInts } from '../math/rng.ts';
 import { FLATCAR_DECK, RAIL_TOP } from '../vehicles/consist.ts';
 import { biomeWeights } from './biome.ts';
 import type { Feature } from './features.ts';
-import { type Route, type TrackFrame, makeFrame } from './route.ts';
+import { type Route, type SpurSpec, type TrackFrame, makeFrame } from './route.ts';
 
 /**
  * Buildings and stops from a modular kit (§4.4, §4.8). Every structure is a pure
@@ -41,7 +43,9 @@ export type PieceKind =
   | 'well'
   | 'wagon'
   | 'ladder'
-  | 'sign';
+  | 'sign'
+  | 'fire'
+  | 'tent';
 
 export interface Piece {
   id: number;
@@ -75,7 +79,7 @@ export interface ItemSpawn {
 
 export interface Structure {
   id: string;
-  kind: 'station' | 'homestead' | 'wagon';
+  kind: 'station' | 'homestead' | 'wagon' | 'town' | 'camp';
   name: string;
   /** World placement: origin and yaw (three.js yaw of the local -Z axis). */
   x: number;
@@ -84,7 +88,9 @@ export interface Structure {
   yaw: number;
   pieces: Piece[];
   spawns: ItemSpawn[];
-  shop?: { piece: number; kind: 'station' | 'wagon'; stock: StockLine[] };
+  shop?: { piece: number; kind: ShopKind; stock: StockLine[] };
+  /** Town index for town buildings. */
+  town?: number;
   /** Flat ground radius around the origin. */
   pad: number;
   /** Rough radius containing everything (for streaming). */
@@ -188,6 +194,39 @@ class Kit {
       cur = b;
     }
     seg(cur, len, y, y + h);
+  }
+
+  /** A false-front western storefront: tall facade, porch with posts, sign board. */
+  storefront(
+    cx: number,
+    cz: number,
+    w: number,
+    d: number,
+    floorY: number,
+    swatch: string,
+    sign: string,
+  ): { x0: number; x1: number; z0: number; z1: number; y: number } {
+    const cab = this.cabin(cx, cz, w, d, floorY, { door: 'front', boards: false, swatch });
+    // Facade rising above the roof line, on the front (-x) wall.
+    this.add('wall', cab.x0 - 0.12, floorY + 3.1 + 0.9, cz, 0.06, 0.9, w * 0 + d / 2 + 0.4, {
+      swatch,
+      solid: false,
+    });
+    this.add('sign', cab.x0 - 0.2, floorY + 3.6, cz, 0.04, 0.35, Math.min(d / 2 - 0.3, 2.2), {
+      solid: false,
+      swatch: sign,
+    });
+    // Porch deck and posts.
+    this.add('platform', cab.x0 - 1.1, floorY - 0.6, cz, 1.0, 0.6, d / 2 + 0.3, {
+      swatch: 'woodGray',
+    });
+    for (const z of [cz - d / 2 - 0.2, cz + d / 2 + 0.2])
+      this.add('post', cab.x0 - 2.0, floorY + 1.4, z, 0.08, 1.4, 0.08, { swatch: 'woodDark' });
+    this.add('roof', cab.x0 - 1.1, floorY + 2.85, cz, 1.05, 0.05, d / 2 + 0.35, {
+      swatch: 'woodGrayDark',
+      solid: false,
+    });
+    return cab;
   }
 
   /** A simple cabin: floor, four walls, door, windows, roof, gable. */
@@ -530,4 +569,332 @@ export function planStructures(route: Route, features: Feature[]): StructurePlan
     ws += rng.range(2600, 4200);
   }
   return { homesteadSpots, wagonS };
+}
+
+// ---------------------------------------------------------------------------
+// Towns (§4.4): reached by handcar along a spur; full shops and lots of loot.
+// ---------------------------------------------------------------------------
+
+type TownRole =
+  'gunsmith' | 'doctor' | 'general' | 'trading' | 'sheriff' | 'saloon' | 'house' | 'church';
+
+const SIGN: Record<TownRole, string> = {
+  gunsmith: 'iron',
+  doctor: 'white',
+  general: 'signYellow',
+  trading: 'brass',
+  sheriff: 'signRed',
+  saloon: 'locoRed',
+  house: 'woodGray',
+  church: 'white',
+};
+
+/**
+ * Buildings for the town at the end of a spur. The street runs on from where the
+ * spur ends; storefronts face it from both sides. Each building is its own
+ * structure so shops, loot and colliders stream independently.
+ */
+export function buildTown(spur: Route, townIndex: number, name: string): Structure[] {
+  const seed = spur.seed;
+  const rng = new Rng(hashInts(seed, 0x70a1, townIndex));
+  spur.frameAt(spur.end, tf);
+  const ex = tf.x;
+  const ey = tf.y;
+  const ez = tf.z;
+  const h = tf.heading;
+  const fx = Math.sin(h);
+  const fz = -Math.cos(h);
+  const rx = Math.cos(h);
+  const rz = Math.sin(h);
+  const wood = woodFor(spur.spur ? 0 : 0);
+  void wood;
+  const roles: TownRole[] = ['gunsmith', 'doctor', 'general', 'trading', 'sheriff', 'saloon'];
+  const extra: TownRole[] = ['house', 'house', 'house', 'church', 'house', 'house'];
+  const left = [] as TownRole[];
+  const right = [] as TownRole[];
+  const all = [...roles, ...extra.slice(0, 4 + rng.int(0, 2))];
+  // Shuffle while keeping the shops near the station end.
+  for (let i = 0; i < all.length; i++) (i % 2 ? right : left).push(all[i] as TownRole);
+  const out: Structure[] = [];
+  const street0 = 22;
+  const spacing = 13;
+  let n = 0;
+  for (const [sideSign, list] of [
+    [-1, left],
+    [1, right],
+  ] as const) {
+    list.forEach((role, i) => {
+      const along = street0 + i * spacing + (sideSign > 0 ? 4 : 0);
+      const lat = sideSign * 11;
+      const cx = ex + fx * along + rx * lat;
+      const cz = ez + fz * along + rz * lat;
+      // Local -x faces the street.
+      const yaw = Math.atan2(sideSign * rx, sideSign * rz) + Math.PI / 2;
+      out.push(buildTownBuilding(seed, townIndex, n++, role, cx, ey, cz, yaw, name, rng));
+    });
+  }
+  // A small handcar platform where the spur ends.
+  const k = new Kit();
+  k.add('platform', 0, 0.45, 0, 2.2, 0.45, 5, { swatch: 'woodGray' });
+  k.add('lamp', 2.0, 0.9 + 1.6, 3.5, 0.06, 1.6, 0.06, { swatch: 'iron' });
+  k.add('sign', 2.1, 2.1, 0, 0.06, 0.45, 1.4, { solid: false, swatch: 'white' });
+  out.push({
+    id: `t${townIndex}p`,
+    kind: 'town',
+    name,
+    x: ex + rx * 3.8,
+    y: ey,
+    z: ez + rz * 3.8,
+    yaw: -h + Math.PI / 2,
+    pieces: k.pieces,
+    spawns: [],
+    pad: 0,
+    radius: 8,
+    wood: 'wood',
+    town: townIndex,
+  });
+  return out;
+}
+
+function buildTownBuilding(
+  seed: number,
+  town: number,
+  n: number,
+  role: TownRole,
+  x: number,
+  y: number,
+  z: number,
+  yaw: number,
+  name: string,
+  rng: Rng,
+): Structure {
+  const k = new Kit();
+  const swatch = rng.pick(['wood', 'woodGray', 'woodLight', 'locoRedDark', 'woodDark']);
+  const w = role === 'saloon' || role === 'trading' ? 9 : role === 'house' ? 6.5 : 7.5;
+  const d = role === 'saloon' ? 11 : role === 'church' ? 12 : 8;
+  const floor = 0.6;
+  const cab =
+    role === 'house' || role === 'church'
+      ? k.cabin(0, 0, w, d, floor, { door: 'front', boards: rng.chance(0.5), swatch })
+      : k.storefront(0, 0, w, d, floor, swatch, SIGN[role]);
+  let shop: Structure['shop'] | undefined;
+  const counter = () =>
+    k.add('counter', cab.x0 + w * 0.55, floor + 0.5, 0, 0.35, 0.5, d * 0.3, { swatch: 'woodDark' });
+  switch (role) {
+    case 'gunsmith':
+    case 'doctor':
+    case 'general':
+    case 'trading':
+    case 'sheriff': {
+      const c = counter();
+      shop = { piece: c.id, kind: role, stock: TOWN_STOCK[role] };
+      k.add('shelf', cab.x1 - 0.35, floor + 1.1, -d * 0.22, 0.25, 1.1, d * 0.15, {
+        loot: 'shelf',
+        swatch: 'wood',
+      });
+      if (role === 'sheriff') {
+        k.add('cabinet', cab.x1 - 0.45, floor + 0.9, d * 0.3, 0.35, 0.9, 0.6, {
+          loot: 'cabinet',
+          swatch: 'iron',
+        });
+        // Jail bars at the back.
+        for (let i = 0; i < 6; i++)
+          k.add('post', cab.x1 - 2.4, floor + 1.2, -d / 2 + 0.6 + i * 0.35, 0.03, 1.2, 0.03, {
+            swatch: 'iron',
+          });
+      }
+      if (role === 'trading')
+        k.add('safe', cab.x1 - 0.55, floor + 0.5, d / 2 - 0.6, 0.45, 0.5, 0.45, {
+          loot: 'safe',
+          swatch: 'ironLight',
+        });
+      break;
+    }
+    case 'saloon': {
+      k.add('counter', cab.x1 - 1.4, floor + 0.55, 0, 0.4, 0.55, d * 0.35, { swatch: 'woodDark' });
+      k.add('shelf', cab.x1 - 0.35, floor + 1.1, 0, 0.25, 1.1, d * 0.3, {
+        loot: 'saloon',
+        swatch: 'wood',
+      });
+      k.add('drawer', cab.x1 - 1.4, floor + 0.4, -d * 0.4, 0.35, 0.4, 0.5, {
+        loot: 'saloon',
+        swatch: 'woodDark',
+      });
+      for (let i = 0; i < 3; i++) {
+        k.spawns.push({
+          kind: 'table',
+          x: cab.x0 + 2 + (i % 2) * 2.5,
+          y: floor,
+          z: -d / 3 + i * (d / 3),
+          ry: rng.range(0, 3),
+        });
+        k.spawns.push({
+          kind: 'chair',
+          x: cab.x0 + 1.4 + (i % 2) * 2.5,
+          y: floor,
+          z: -d / 3 + i * (d / 3) + 0.9,
+          ry: rng.range(0, 6),
+        });
+      }
+      break;
+    }
+    case 'house':
+      k.add('drawer', cab.x0 + 0.5, floor + 0.45, cab.z0 + 0.8, 0.4, 0.45, 0.6, {
+        loot: 'drawer',
+        swatch: 'woodDark',
+      });
+      k.add('cabinet', cab.x1 - 0.45, floor + 0.9, cab.z1 - 0.8, 0.35, 0.9, 0.6, {
+        loot: 'cabinet',
+        swatch: 'wood',
+      });
+      if (rng.chance(0.3))
+        k.add('safe', cab.x1 - 0.5, floor + 0.5, 0, 0.45, 0.5, 0.45, {
+          loot: 'safe',
+          swatch: 'ironLight',
+        });
+      for (let i = 0; i < 2; i++)
+        k.spawns.push({
+          kind: rng.pick<ItemKind>(['chair', 'table', 'cabinet', 'crate']),
+          x: rng.range(cab.x0 + 1.4, cab.x1 - 1.4),
+          y: floor,
+          z: rng.range(cab.z0 + 1.2, cab.z1 - 1.2),
+          ry: rng.range(0, 6),
+        });
+      break;
+    case 'church':
+      for (let i = 0; i < 4; i++)
+        k.spawns.push({
+          kind: 'chair',
+          x: cab.x0 + 2 + i * 1.2,
+          y: floor,
+          z: rng.range(-2, 2),
+          ry: Math.PI / 2,
+        });
+      k.add('post', cab.x1 - 1, floor + 4.6, 0, 0.12, 1.4, 0.12, { swatch: 'white', solid: false });
+      k.add('post', cab.x1 - 1, floor + 5.3, 0, 0.12, 0.12, 0.6, { swatch: 'white', solid: false });
+      break;
+  }
+  if (rng.chance(0.4))
+    k.spawns.push({
+      kind: rng.pick<ItemKind>(['barrel', 'crate', 'lumber']),
+      x: cab.x0 - 1.6,
+      y: floor,
+      z: rng.range(-d / 2, d / 2),
+      ry: rng.range(0, 6),
+    });
+  if (role === 'general' && rng.chance(0.6))
+    k.spawns.push({ kind: 'trolley_kit', x: cab.x0 - 3.2, y: 0, z: d / 2 + 1.5, ry: 0 });
+  const label =
+    role === 'house'
+      ? 'House'
+      : role === 'church'
+        ? 'Church'
+        : `${name} ${role === 'trading' ? 'trading post' : role === 'general' ? 'general store' : role}`;
+  return {
+    id: `t${town}b${n}`,
+    kind: 'town',
+    name: label,
+    x,
+    y,
+    z,
+    yaw,
+    pieces: k.pieces,
+    spawns: k.spawns,
+    ...(shop ? { shop } : {}),
+    pad: 9,
+    radius: 14,
+    wood: swatch,
+    town,
+  };
+}
+
+/** The spur line for a junction (§4.4): a siding that curves away to a town 300–800 m off. */
+export function spurSpec(main: Route, f: Feature, index: number): SpurSpec {
+  const rng = new Rng(hashInts(main.seed, 0x5b0, index));
+  main.frameAt(f.s, tf);
+  const side = f.side;
+  const lat = side * 4.6;
+  const length = Math.round(rng.range(320, 650));
+  const pieces: SpurSpec['pieces'] = [];
+  let used = 0;
+  const push = (len: number, k0: number, k1: number) => {
+    pieces.push({ len, k0, k1 });
+    used += len;
+  };
+  // The siding where the handcar waits, then a turnout curving away.
+  push(45, 0, 0);
+  const k = side / 170;
+  push(50, 0, k);
+  push(90, k, k);
+  push(50, k, 0);
+  // Gentle meanders that never swing back toward the main line.
+  let dir = 1;
+  while (used < length - 80) {
+    const r = rng.range(520, 900);
+    const len = Math.min(rng.range(60, 130), length - 80 - used);
+    if (len < 20) break;
+    push(len / 3, 0, (side * dir) / r);
+    push(len / 3, (side * dir) / r, (side * dir) / r);
+    push(len / 3, (side * dir) / r, 0);
+    dir = -dir;
+  }
+  push(Math.max(20, length - used), 0, 0);
+  const total = pieces.reduce((a, p) => a + p.len, 0);
+  return {
+    index,
+    length: total,
+    x0: tf.x + tf.rx * lat,
+    z0: tf.z + tf.rz * lat,
+    h0: tf.heading,
+    y0: main.heightAt(f.s),
+    pieces,
+  };
+}
+
+/** An outlaw camp beside the line (§4.6): a fire, tents, loot, and guards by day. */
+export function buildCamp(route: Route, seed: number, idx: number, s: number): Structure {
+  const rng = new Rng(hashInts(seed, 0xca4, idx));
+  route.frameAt(s, tf);
+  const side = rng.chance(0.5) ? 1 : -1;
+  const lat = side * rng.range(42, 70);
+  const x = tf.x + tf.rx * lat;
+  const z = tf.z + tf.rz * lat;
+  const k = new Kit();
+  k.add('fire', 0, 0.15, 0, 0.6, 0.15, 0.6, { solid: false, swatch: 'rock' });
+  for (let i = 0; i < 3; i++) {
+    const a = (i / 3) * Math.PI * 2 + rng.range(-0.3, 0.3);
+    k.add('tent', Math.cos(a) * 6, 1.0, Math.sin(a) * 6, 1.3, 1.0, 1.6, {
+      ry: -a,
+      swatch: 'shirt',
+    });
+  }
+  k.spawns.push({ kind: 'crate', x: 2.5, y: 0, z: -2, ry: 0.3 });
+  k.spawns.push({ kind: rng.chance(0.5) ? 'strongbox' : 'barrel', x: -2.6, y: 0, z: 2.2, ry: 1.2 });
+  k.spawns.push({ kind: 'lumber', x: 1.5, y: 0, z: 2.8, ry: 0.4 });
+  return {
+    id: `c${idx}`,
+    kind: 'camp',
+    name: 'Outlaw camp',
+    x,
+    y: 0,
+    z,
+    yaw: 0,
+    pieces: k.pieces,
+    spawns: k.spawns,
+    pad: 12,
+    radius: 14,
+    wood: 'wood',
+  };
+}
+
+/** Camp positions: a couple per biome, away from other stops. */
+export function planCamps(route: Route, features: Feature[]): number[] {
+  const rng = new Rng(hashInts(route.seed, 0xca5));
+  const out: number[] = [];
+  let s = 1600 + rng.range(0, 800);
+  while (s < ROUTE_LENGTH - 800) {
+    if (features.every((f) => Math.abs(f.s - s) > 350)) out.push(s);
+    s += rng.range(2800, 4200);
+  }
+  return out;
 }
