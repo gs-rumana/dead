@@ -10,13 +10,13 @@ function post(msg: FromWorker, transfer: Transferable[] = []): void {
   self.postMessage(msg, transfer);
 }
 
-self.onmessage = (e: MessageEvent<ToWorker>) => {
+self.onmessage = async (e: MessageEvent<ToWorker>) => {
   const msg = e.data;
   try {
     switch (msg.type) {
       case 'join': {
         const seed = msg.seed ?? (Math.random() * 2 ** 32) >>> 0;
-        room = new LocalRoom(post, seed);
+        room = await LocalRoom.create(post, seed);
         room.join(msg.opts);
         break;
       }

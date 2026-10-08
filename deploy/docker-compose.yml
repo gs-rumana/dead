@@ -1,0 +1,26 @@
+# Runs on the Oracle Always Free VM (§9). Caddy terminates TLS for wss://.
+services:
+  game:
+    image: ghcr.io/${GITHUB_OWNER:-dead-tracks}/dead-tracks-server:latest
+    restart: unless-stopped
+    environment:
+      - PORT=2567
+    volumes:
+      - ./data:/app/data
+    expose:
+      - '2567'
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      - SERVER_DOMAIN=${SERVER_DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+volumes:
+  caddy_data:
+  caddy_config:

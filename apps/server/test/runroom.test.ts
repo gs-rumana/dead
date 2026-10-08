@@ -53,3 +53,29 @@ describe('RunRoom', () => {
     ).rejects.toThrow();
   });
 });
+
+describe('RunRoom reconnection', () => {
+  it('holds a dropped player and restores them on reconnect', async () => {
+    const a = new Client(`http://localhost:${PORT}`);
+    const room = await a.create(RUN_ROOM, { protocol: PROTOCOL_VERSION, name: 'A' }, RunState);
+    await until(() => room.state.players.size === 1);
+    const token = room.reconnectionToken;
+    const sid = room.sessionId;
+    room.reconnection.enabled = false;
+    // Simulate an abrupt network drop.
+    (
+      room.connection as unknown as { transport: { ws: { close: (c: number) => void } } }
+    ).transport.ws.close(3000);
+    const b = new Client(`http://localhost:${PORT}`);
+    await new Promise((r) => setTimeout(r, 300));
+    const back = await b.reconnect(token, RunState);
+    expect(back.sessionId).toBe(sid);
+    await until(
+      () =>
+        back.state.players.get(sid) !== undefined &&
+        (back.state.players.get(sid)!.flags & 16) === 0,
+    );
+    expect(back.state.players.size).toBe(1);
+    await back.leave();
+  });
+});

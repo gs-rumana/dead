@@ -1,0 +1,73 @@
+name: Deploy
+
+# §9: push to main → client to Cloudflare Pages, server image to the VM.
+# Each job only runs once its secrets exist, so forks and fresh clones stay green.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  client:
+    runs-on: ubuntu-latest
+    env:
+      CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        if: env.CF_TOKEN != ''
+      - uses: pnpm/action-setup@v4
+        if: env.CF_TOKEN != ''
+      - uses: actions/setup-node@v4
+        if: env.CF_TOKEN != ''
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+        if: env.CF_TOKEN != ''
+      - run: pnpm --filter @dead-tracks/client build
+        if: env.CF_TOKEN != ''
+        env:
+          VITE_SERVER_URL: ${{ vars.SERVER_URL }}
+      - uses: cloudflare/wrangler-action@v3
+        if: env.CF_TOKEN != ''
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy apps/client/dist --project-name=dead-tracks
+
+  server:
+    runs-on: ubuntu-latest
+    env:
+      VM_HOST: ${{ secrets.VM_HOST }}
+    steps:
+      - uses: actions/checkout@v4
+        if: env.VM_HOST != ''
+      - uses: docker/setup-qemu-action@v3
+        if: env.VM_HOST != ''
+      - uses: docker/setup-buildx-action@v3
+        if: env.VM_HOST != ''
+      - uses: docker/login-action@v3
+        if: env.VM_HOST != ''
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        if: env.VM_HOST != ''
+        with:
+          context: .
+          platforms: linux/arm64
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/dead-tracks-server:latest
+      - name: Restart on the VM
+        if: env.VM_HOST != ''
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          script: cd ~/dead-tracks && docker compose pull && docker compose up -d

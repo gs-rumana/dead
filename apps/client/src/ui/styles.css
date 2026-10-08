@@ -145,3 +145,466 @@ button:disabled {
   bottom: 16px;
   right: 16px;
 }
+
+/* ---------- HUD ---------- */
+.hud {
+  position: absolute;
+  inset: 0;
+  font-size: 14px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.route {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(460px, 60vw);
+}
+
+.route-row {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.route-bar {
+  position: relative;
+  height: 5px;
+  margin-top: 4px;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.route-fill {
+  height: 100%;
+  background: var(--accent);
+}
+
+.route-mark {
+  position: absolute;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 4px;
+  height: 4px;
+  margin: -2px 0 0 -2px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 2px #000;
+}
+
+.prompt {
+  position: absolute;
+  left: 50%;
+  top: 60%;
+  transform: translateX(-50%);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+kbd {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 0.1em 0.45em;
+  margin-right: 0.35em;
+  border-radius: 4px;
+  background: var(--ink);
+  color: var(--paper);
+  font:
+    700 0.85em ui-sans-serif,
+    system-ui,
+    sans-serif;
+  text-align: center;
+  text-shadow: none;
+}
+
+.cab {
+  position: absolute;
+  right: max(14px, env(safe-area-inset-right));
+  bottom: 18px;
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  padding: 10px 12px;
+  background: rgba(22, 17, 13, 0.72);
+  border: 1px solid #5a4632;
+  border-radius: 8px;
+}
+
+.dial {
+  width: 104px;
+  text-align: center;
+}
+
+.dial svg {
+  width: 104px;
+  height: 104px;
+}
+
+.dial-face {
+  fill: #e8dcc0;
+  stroke: #8a6526;
+  stroke-width: 4;
+}
+
+.dial-tick {
+  stroke: #2b2420;
+  stroke-width: 2;
+}
+
+.dial-needle {
+  stroke: #1a1a1a;
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.dial-needle.danger {
+  stroke: #b3261e;
+}
+
+.dial-hub {
+  fill: #8a6526;
+}
+
+.dial-value {
+  font:
+    700 14px ui-monospace,
+    monospace;
+  fill: #2b2420;
+  text-anchor: middle;
+  text-shadow: none;
+}
+
+.dial-label {
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.dial-label span {
+  opacity: 0.7;
+}
+
+.cab-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 180px;
+  font-size: 13px;
+}
+
+.cab-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cab-keys {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--ink-dim);
+}
+
+.bar {
+  width: 110px;
+  height: 7px;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.bar > div {
+  height: 100%;
+  background: var(--ink);
+}
+
+.bar.fuel > div {
+  background: #e08a35;
+}
+
+.bar.fuel.low > div {
+  background: var(--danger);
+}
+
+.bar.throttle > div {
+  background: #6fa86b;
+}
+
+.bar.brake > div {
+  background: #c4573d;
+}
+
+.bar.hp > div {
+  background: #c4573d;
+}
+
+.bar.stamina > div {
+  background: #d9c47a;
+}
+
+.vitals {
+  position: absolute;
+  left: max(14px, env(safe-area-inset-left));
+  bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.vitals .bar {
+  width: 150px;
+}
+
+.train-widget {
+  position: absolute;
+  top: 54px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 10px;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.5);
+  font-weight: 600;
+}
+
+.toasts {
+  position: absolute;
+  top: 30%;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+}
+
+.toast {
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.6);
+}
+
+.click-to-play {
+  position: absolute;
+  left: 50%;
+  top: 42%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 20px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.click-to-play b {
+  font-size: 18px;
+}
+
+.click-to-play span {
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+/* ---------- Touch ---------- */
+.touch {
+  position: absolute;
+  inset: 0;
+}
+
+.touch-stick-zone {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 45%;
+  height: 65%;
+}
+
+.touch-look-zone {
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 55%;
+  height: 100%;
+}
+
+.stick-base {
+  position: fixed;
+  width: 112px;
+  height: 112px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.12);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+}
+
+.stick-knob {
+  position: absolute;
+  left: 32px;
+  top: 32px;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.5);
+}
+
+.touch-buttons {
+  position: absolute;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: 22px;
+  display: grid;
+  grid-template-columns: repeat(2, 64px);
+  gap: 10px;
+}
+
+.tb {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  padding: 0;
+  font-size: 12px;
+  color: var(--ink);
+  background: rgba(0, 0, 0, 0.45);
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  touch-action: none;
+}
+
+.tb.big {
+  width: 72px;
+  height: 72px;
+}
+
+.tb.on,
+.tb.use.ready {
+  background: rgba(217, 164, 65, 0.75);
+  color: var(--paper);
+}
+
+/* ---------- Menus ---------- */
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 8, 6, 0.6);
+  pointer-events: auto;
+}
+
+.panel {
+  width: min(380px, 92vw);
+  max-height: 90vh;
+  overflow: auto;
+  padding: 18px 20px;
+  border-radius: 10px;
+  background: #1f1812;
+  border: 1px solid #5a4632;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.panel h2 {
+  margin: 0 0 4px;
+  font-family: Georgia, serif;
+  color: var(--accent);
+}
+
+.panel label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--ink-dim);
+}
+
+.panel label span {
+  float: right;
+  color: var(--ink);
+}
+
+.panel label.check {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink);
+}
+
+.panel select,
+.panel input[type='range'] {
+  pointer-events: auto;
+  width: 100%;
+}
+
+.panel select {
+  font: inherit;
+  padding: 6px;
+  background: #0d0a08;
+  color: var(--ink);
+  border: 1px solid #4a3b2c;
+  border-radius: 6px;
+}
+
+.panel .row {
+  display: flex;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+button.secondary {
+  background: #3a2d22;
+  color: var(--ink);
+}
+
+.dev-panel {
+  position: absolute;
+  top: 80px;
+  left: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.dev-panel button {
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.menu-button {
+  position: absolute;
+  top: max(8px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  font-size: 20px;
+  background: rgba(0, 0, 0, 0.45);
+  color: var(--ink);
+}
+
+.netsim {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 4px;
+  color: var(--ink-dim);
+}
+
+.netsim input {
+  pointer-events: auto;
+  width: 130px;
+}

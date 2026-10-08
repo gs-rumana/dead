@@ -25,6 +25,14 @@ async function readTest(page: Page) {
   });
 }
 
+async function nudge(page: Page) {
+  await page.evaluate(() =>
+    (
+      window as unknown as { __dt: { conn: { send: (t: string, m: unknown) => void } } }
+    ).__dt.conn.send('cmd', { t: 'nudge' }),
+  );
+}
+
 async function waitForGame(page: Page) {
   await page.waitForFunction(() => {
     const dt = (window as unknown as { __dt?: DebugHandle }).__dt;
@@ -42,7 +50,7 @@ test('solo session runs the simulation in a worker', async ({ page }) => {
   const b = await readTest(page);
   expect(b.tick).toBeGreaterThan(a.tick);
   expect(a.code).toBe('SOLO');
-  await page.getByTestId('nudge').click();
+  await nudge(page);
   await expect.poll(async () => (await readTest(page)).nudges).toBe(1);
   await page.screenshot({ path: 'out/m0-solo.png' });
   expect(errors).toEqual([]);
@@ -63,7 +71,7 @@ test('two clients share the same synced test object through the server', async (
   await expect.poll(async () => (await readTest(a)).players).toBe(2);
   expect((await readTest(b)).players).toBe(2);
 
-  await b.getByTestId('nudge').click();
+  await nudge(b);
   await expect.poll(async () => (await readTest(a)).nudges).toBe(1);
   const sa = await readTest(a);
   const sb = await readTest(b);

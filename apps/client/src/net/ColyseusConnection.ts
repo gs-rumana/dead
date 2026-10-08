@@ -7,6 +7,7 @@ import {
   RunState,
 } from '@dead-tracks/shared';
 import { type Connection, Emitter, NetMeter } from './Connection.ts';
+import { wsCounter } from './wsPatch.ts';
 
 /** Multiplayer: the authoritative simulation runs in a Colyseus RunRoom (§6.8). */
 export class ColyseusConnection implements Connection {
@@ -15,6 +16,7 @@ export class ColyseusConnection implements Connection {
   private readonly patch = new Emitter<[]>();
   private readonly events = new Emitter<[GameEvent[]]>();
   private readonly closed = new Emitter<[string]>();
+  readonly status = new Emitter<['reconnecting' | 'connected']>();
   private pingTimer = 0;
 
   private constructor(private readonly room: Room<any, RunState>) {
@@ -22,6 +24,8 @@ export class ColyseusConnection implements Connection {
     room.onMessage('events', (events: GameEvent[]) => this.events.emit(events));
     room.onMessage('pong', (sentAt: number) => this.meter.pong(sentAt));
     room.onMessage('welcome', () => {});
+    room.onDrop(() => this.status.emit('reconnecting'));
+    room.onReconnect(() => this.status.emit('connected'));
     room.onLeave((code: number, reason?: string) => {
       clearInterval(this.pingTimer);
       this.closed.emit(reason || `left (${code})`);
@@ -51,7 +55,6 @@ export class ColyseusConnection implements Connection {
     opts: JoinOptions,
     seed?: number,
   ): Promise<ColyseusConnection> {
-    const meter = installByteCounter();
     const client = new Client(serverUrl);
     const room = opts.code
       ? await client.joinById(opts.code, opts, RunState)
@@ -60,8 +63,11 @@ export class ColyseusConnection implements Connection {
           { ...opts, ...(seed === undefined ? {} : { seed }) },
           RunState,
         );
+    // Don't flush a long backlog of stale inputs after a reconnect.
+    room.reconnection.maxEnqueuedMessages = 8;
+    room.reconnection.maxRetries = 30;
     const conn = new ColyseusConnection(room);
-    meter.target = conn.meter;
+    wsCounter.target = conn.meter;
     return conn;
   }
 
@@ -85,36 +91,4 @@ export class ColyseusConnection implements Connection {
     clearInterval(this.pingTimer);
     void this.room.leave(true);
   }
-}
-
-/**
- * Counts WebSocket bytes for the performance HUD by wrapping the global WebSocket once.
- * Only the most recent connection's meter receives counts.
- */
-const counter: { target: NetMeter | null } = { target: null };
-let installed = false;
-function installByteCounter(): { target: NetMeter | null } {
-  if (installed) return counter;
-  installed = true;
-  const Native = globalThis.WebSocket;
-  class CountingWebSocket extends Native {
-    constructor(url: string | URL, protocols?: string | string[]) {
-      super(url, protocols);
-      this.addEventListener('message', (e: MessageEvent) => {
-        const d = e.data as ArrayBuffer | Blob | string;
-        const n =
-          typeof d === 'string' ? d.length : d instanceof ArrayBuffer ? d.byteLength : d.size;
-        counter.target?.addIn(n);
-      });
-    }
-
-    override send(data: string | Blob | BufferSource): void {
-      const n =
-        typeof data === 'string' ? data.length : data instanceof Blob ? data.size : data.byteLength;
-      counter.target?.addOut(n);
-      super.send(data);
-    }
-  }
-  globalThis.WebSocket = CountingWebSocket;
-  return counter;
 }

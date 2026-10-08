@@ -280,6 +280,19 @@ importers:
         specifier: ^0.21.0
         version: 0.21.0
 
+  tools/bots:
+    dependencies:
+      '@colyseus/sdk':
+        specifier: ^0.18.5
+        version: 0.18.5(@colyseus/core@0.18.18)(typescript@6.0.3)
+      '@dead-tracks/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+    devDependencies:
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
+
   tools/e2e:
     devDependencies:
       '@playwright/test':

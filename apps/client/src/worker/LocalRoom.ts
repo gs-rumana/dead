@@ -8,7 +8,6 @@ import type { FromWorker } from '../net/workerProtocol.ts';
  * sends schema patches at 20 Hz, encoded exactly the way the server encodes them.
  */
 export class LocalRoom {
-  private readonly host: RunHost;
   private readonly encoder: Encoder;
   private readonly view = new StateView();
   private readonly client: HostClient;
@@ -18,17 +17,23 @@ export class LocalRoom {
   private sincePatch = 0;
   private joined = false;
 
-  constructor(
+  private constructor(
+    private readonly host: RunHost,
     private readonly post: (msg: FromWorker, transfer?: Transferable[]) => void,
-    seed: number,
   ) {
-    this.host = new RunHost({ seed, code: 'SOLO' });
     this.encoder = new Encoder(this.host.state);
     this.client = {
       id: 'solo',
       view: this.view,
       send: (t, p) => this.post({ type: 'msg', t, p }),
     };
+  }
+
+  static async create(
+    post: (msg: FromWorker, transfer?: Transferable[]) => void,
+    seed: number,
+  ): Promise<LocalRoom> {
+    return new LocalRoom(await RunHost.create({ seed, code: 'SOLO' }), post);
   }
 
   join(opts: JoinOptions): void {

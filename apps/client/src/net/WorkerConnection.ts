@@ -7,6 +7,7 @@ import {
   RunState,
 } from '@dead-tracks/shared';
 import { type Connection, Emitter, NetMeter } from './Connection.ts';
+import { DelayLine } from './NetSim.ts';
 import type { FromWorker, ToWorker } from './workerProtocol.ts';
 
 /** Solo play: the authoritative simulation runs in a Web Worker on this device (§6.5). */
@@ -21,6 +22,8 @@ export class WorkerConnection implements Connection {
   private readonly events = new Emitter<[GameEvent[]]>();
   private readonly closed = new Emitter<[string]>();
   private pingTimer = 0;
+  private readonly inLine = new DelayLine();
+  private readonly outLine = new DelayLine();
 
   private constructor(private readonly worker: Worker) {
     this.decoder = new Decoder(new RunState());
@@ -49,7 +52,7 @@ export class WorkerConnection implements Connection {
         } else if (msg.type === 'error') {
           reject(new Error(msg.message));
         }
-        conn.handle(msg);
+        conn.inLine.push(() => conn.handle(msg));
       };
       conn.post({ type: 'join', opts, ...(seed === undefined ? {} : { seed }) });
       conn.pingTimer = window.setInterval(() => conn.send('ping', performance.now()), 2000);
@@ -80,8 +83,10 @@ export class WorkerConnection implements Connection {
   }
 
   private post(msg: ToWorker): void {
-    if (msg.type === 'msg') this.meter.addOut(JSON.stringify(msg.p ?? null).length + 4);
-    this.worker.postMessage(msg);
+    if (msg.type === 'msg') {
+      this.meter.addOut(JSON.stringify(msg.p ?? null).length + 4);
+      this.outLine.push(() => this.worker.postMessage(msg));
+    } else this.worker.postMessage(msg);
   }
 
   private handle(msg: FromWorker): void {

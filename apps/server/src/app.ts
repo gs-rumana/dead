@@ -1,6 +1,7 @@
 import { createEndpoint, createRouter, defineRoom, defineServer } from '@colyseus/core';
 import { WebSocketTransport } from '@colyseus/ws-transport';
 import { PROTOCOL_VERSION, RUN_ROOM } from '@dead-tracks/shared';
+import { snapshot } from './metrics.ts';
 import { RunRoom } from './rooms/RunRoom.ts';
 
 export function createGameServer() {
@@ -15,6 +16,7 @@ export function createGameServer() {
         protocol: PROTOCOL_VERSION,
         uptime: Math.round(process.uptime()),
       })),
+      metrics: createEndpoint('/metrics', { method: 'GET' }, async () => snapshot()),
     }),
   });
 }

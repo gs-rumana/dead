@@ -1,0 +1,6 @@
+node_modules
+**/node_modules
+**/dist
+tools/e2e/out
+.git
+assets-src

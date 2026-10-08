@@ -5,6 +5,7 @@ import {
   type JoinOptions,
   type ServerMessages,
   PROTOCOL_VERSION,
+  PlayerFlag,
   PlayerState,
   RunState,
   SIM_DT,
@@ -31,15 +32,20 @@ export interface RunHostOptions {
  */
 export class RunHost {
   readonly state = new RunState();
-  readonly sim: Sim;
   private readonly clients = new Map<string, HostClient>();
 
-  constructor(opts: RunHostOptions) {
-    this.sim = new Sim({ seed: opts.seed });
+  private constructor(
+    readonly sim: Sim,
+    opts: RunHostOptions,
+  ) {
     this.state.protocol = PROTOCOL_VERSION;
     this.state.seed = this.sim.seed;
     this.state.code = opts.code;
     this.writeState();
+  }
+
+  static async create(opts: RunHostOptions): Promise<RunHost> {
+    return new RunHost(await Sim.create({ seed: opts.seed }), opts);
   }
 
   get playerCount(): number {
@@ -57,6 +63,23 @@ export class RunHost {
     ps.name = name;
     this.state.players.set(client.id, ps);
     this.writeState();
+    client.send('welcome', {
+      selfId: client.id,
+      seed: this.sim.seed,
+      code: this.state.code,
+      protocol: PROTOCOL_VERSION,
+    });
+  }
+
+  /** The client's connection dropped; its slot is held (§6.8: 60 s). */
+  drop(client: HostClient): void {
+    this.sim.setConnected(client.id, false);
+  }
+
+  /** The same client came back within the reconnection window. */
+  reconnect(client: HostClient): void {
+    this.clients.set(client.id, client);
+    this.sim.setConnected(client.id, true);
     client.send('welcome', {
       selfId: client.id,
       seed: this.sim.seed,
@@ -108,23 +131,48 @@ export class RunHost {
     state.test.angle = sim.test.angle;
     state.test.color = sim.test.color;
     state.test.nudges = sim.test.nudges;
+    const tr = sim.train;
+    const ts = state.train;
+    ts.s = tr.s;
+    ts.speed = tr.speed;
+    ts.throttle = tr.throttle;
+    ts.brake = tr.brake;
+    ts.reverser = tr.reverser;
+    ts.fuel = tr.fuel;
+    ts.coal = tr.coal;
+    ts.pressure = tr.pressure;
+    ts.driver = tr.driver;
     for (const p of sim.players.values()) {
       const ps = state.players.get(p.id);
       if (!ps) continue;
-      ps.frame = p.frame;
-      ps.x = p.x;
-      ps.y = p.y;
-      ps.z = p.z;
-      ps.vx = p.vx;
-      ps.vy = p.vy;
-      ps.vz = p.vz;
-      ps.yaw = p.yaw;
-      ps.pitch = p.pitch;
-      ps.flags = p.flags;
+      const m = p.motor;
+      ps.frame = m.frame;
+      ps.x = m.x;
+      ps.y = m.y;
+      ps.z = m.z;
+      ps.vx = m.vx;
+      ps.vy = m.vy;
+      ps.vz = m.vz;
+      ps.yaw = m.yaw;
+      ps.pitch = m.pitch;
+      ps.flags =
+        (m.grounded ? PlayerFlag.Grounded : 0) |
+        (m.sprinting ? PlayerFlag.Sprinting : 0) |
+        (m.driving ? PlayerFlag.Driving : 0) |
+        (p.connected ? 0 : PlayerFlag.Away);
       ps.ack = p.ack;
       ps.hp = Math.round(p.hp);
-      ps.stamina = Math.round(p.stamina);
+      ps.stamina = m.stamina;
+      ps.airTime = m.airTime;
+      ps.mantle = m.mantle;
+      ps.mx = m.mx;
+      ps.my = m.my;
+      ps.mz = m.mz;
     }
+  }
+
+  dispose(): void {
+    this.sim.dispose();
   }
 
   private flushEvents(): void {

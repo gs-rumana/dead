@@ -1,7 +1,10 @@
 import { Room, matchMaker, type Client } from '@colyseus/core';
 import { type JoinOptions, type RunState, MAX_PARTY, PATCH_MS, SIM_DT } from '@dead-tracks/shared';
 import { type HostClient, RunHost } from '@dead-tracks/sim/host';
+import { playerJoined, playerLeft, recordTick, roomClosed, roomOpened } from '../metrics.ts';
 import { randomCode } from './codes.ts';
+
+const RECONNECT_SECONDS = 60;
 
 export interface RunRoomOptions {
   seed?: number;
@@ -11,6 +14,8 @@ export interface RunRoomOptions {
 export class RunRoom extends Room<{ state: RunState }> {
   override maxClients = MAX_PARTY;
   override patchRate = PATCH_MS;
+  /** §6.11: per-client message rate limit (30 inputs/s plus commands and pings). */
+  override maxMessagesPerSecond = 90;
 
   private host!: RunHost;
   private readonly hostClients = new Map<string, HostClient>();
@@ -20,7 +25,7 @@ export class RunRoom extends Room<{ state: RunState }> {
     this.roomId = await this.uniqueCode();
     const seed =
       typeof options.seed === 'number' ? options.seed >>> 0 : (Math.random() * 2 ** 32) >>> 0;
-    this.host = new RunHost({ seed, code: this.roomId });
+    this.host = await RunHost.create({ seed, code: this.roomId });
     this.state = this.host.state;
 
     this.onMessage('*', (client: Client, type: string | number, message: unknown) => {
@@ -29,6 +34,12 @@ export class RunRoom extends Room<{ state: RunState }> {
     });
 
     this.setSimulationInterval((deltaMs) => this.tick(deltaMs), 1000 / 60);
+    roomOpened();
+  }
+
+  override onDispose(): void {
+    roomClosed();
+    this.host?.dispose();
   }
 
   override onJoin(client: Client, options: JoinOptions): void {
@@ -38,6 +49,27 @@ export class RunRoom extends Room<{ state: RunState }> {
     };
     this.hostClients.set(client.sessionId, hc);
     this.host.join(hc, options);
+    playerJoined();
+  }
+
+  /** Mobile browsers drop sockets in the background: hold the slot for 60 s (§6.8). */
+  override async onDrop(client: Client): Promise<void> {
+    const hc = this.hostClients.get(client.sessionId);
+    if (hc) this.host.drop(hc);
+    try {
+      await this.allowReconnection(client, RECONNECT_SECONDS);
+    } catch {
+      // Window expired; onLeave cleans up.
+    }
+  }
+
+  override onReconnect(client: Client): void {
+    const hc: HostClient = {
+      id: client.sessionId,
+      send: (type, msg) => client.send(type, msg),
+    };
+    this.hostClients.set(client.sessionId, hc);
+    this.host.reconnect(hc);
   }
 
   override onLeave(client: Client): void {
@@ -45,6 +77,7 @@ export class RunRoom extends Room<{ state: RunState }> {
     if (!hc) return;
     this.hostClients.delete(client.sessionId);
     this.host.leave(hc);
+    playerLeft();
   }
 
   /** Fixed 30 Hz simulation driven by a faster wall-clock timer. */
@@ -52,7 +85,9 @@ export class RunRoom extends Room<{ state: RunState }> {
     this.accumulator += Math.min(deltaMs / 1000, 0.25);
     let steps = 0;
     while (this.accumulator >= SIM_DT && steps < 4) {
+      const t0 = performance.now();
       this.host.step(SIM_DT);
+      recordTick(performance.now() - t0);
       this.accumulator -= SIM_DT;
       steps++;
     }

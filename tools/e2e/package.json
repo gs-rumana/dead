@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "test": "playwright test",
+    "soak": "SOAK=1 playwright test -c playwright.soak.config.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "devDependencies": {

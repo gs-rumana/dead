@@ -9,6 +9,10 @@ export const config = {
   seed: params.has('seed') ? Number(params.get('seed')) >>> 0 : undefined,
   name: params.get('name') ?? undefined,
   perfHud: params.has('perf') || import.meta.env.DEV,
+  /** Show the developer tuning panel from the start (?dev). */
+  dev: params.has('dev'),
+  /** Force a quality tier: ?quality=low|medium|high. */
+  quality: params.get('quality') as 'low' | 'medium' | 'high' | null,
   /** Party code from /join/ABCD or ?code=ABCD. */
   code: (
     location.pathname.match(/\/join\/([A-Za-z]{4})/)?.[1] ??

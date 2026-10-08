@@ -1,3 +1,4 @@
+import './net/wsPatch.ts';
 import { render } from 'preact';
 import { PROTOCOL_VERSION } from '@dead-tracks/shared';
 import { Game } from './core/Game.ts';
@@ -31,9 +32,35 @@ async function startGame(mode: StartMode): Promise<Game> {
   return game;
 }
 
-render(<App onStart={startGame} />, ui);
+function supported(): boolean {
+  try {
+    return !!document.createElement('canvas').getContext('webgl2');
+  } catch {
+    return false;
+  }
+}
 
-if (config.autostart) {
+const viewer = new URLSearchParams(location.search).get('viewer');
+if (!supported()) {
+  // §8: devices without WebGL2 get a friendly page instead of a broken game.
+  render(
+    <div class="menu" data-testid="unsupported">
+      <h1>Dead Tracks</h1>
+      <p class="tagline">This browser or device can't run the game (it needs WebGL 2).</p>
+      <p class="tagline">Try a recent Chrome, Edge, Firefox or Safari, or another device.</p>
+    </div>,
+    ui,
+  );
+} else if (viewer) {
+  const q = new URLSearchParams(location.search);
+  void import('./dev/viewer.ts').then((m) =>
+    m.runViewer(canvas, viewer, Number(q.get('angle') ?? 0.7), Number(q.get('dist') ?? 0.9)),
+  );
+} else {
+  render(<App onStart={startGame} />, ui);
+}
+
+if (config.autostart && !viewer) {
   const button = document.querySelector<HTMLButtonElement>(
     config.autostart === 'solo'
       ? '[data-testid=play-solo]'

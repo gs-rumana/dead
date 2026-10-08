@@ -10,9 +10,10 @@ export const PlayerState = schema(
     name: t.string(),
     /** Frame enum (see Frame). */
     frame: t.uint8(),
-    x: t.float32(),
-    y: t.float32(),
-    z: t.float32(),
+    /** Feet position: absolute world metres, or train space (§6.7). float64 keeps mm precision at 20 km. */
+    x: t.float64(),
+    y: t.float64(),
+    z: t.float64(),
     vx: t.float32(),
     vy: t.float32(),
     vz: t.float32(),
@@ -23,7 +24,13 @@ export const PlayerState = schema(
     /** Last input sequence the host applied for this player. */
     ack: t.uint32(),
     hp: t.uint8(),
-    stamina: t.uint8(),
+    stamina: t.float32(),
+    airTime: t.float32(),
+    /** Mantle (ledge climb) time left and target, in the player's frame. */
+    mantle: t.float32(),
+    mx: t.float64(),
+    my: t.float32(),
+    mz: t.float64(),
   },
   'PlayerState',
 );
@@ -34,6 +41,8 @@ export const PlayerFlag = {
   Sprinting: 1 << 1,
   Driving: 1 << 2,
   Aiming: 1 << 3,
+  /** Connection dropped; slot held for reconnection, character idle and protected (§6.8). */
+  Away: 1 << 4,
 } as const;
 
 export const TrainState = schema(
