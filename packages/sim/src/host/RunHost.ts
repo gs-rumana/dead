@@ -257,24 +257,35 @@ export class RunHost {
       if (!es) {
         es = new EnemyState();
         es.type = ENEMY_TYPES.indexOf(e.type);
+        es.frame = e.frame;
+        es.x = e.x;
+        es.y = e.y;
+        es.z = e.z;
+        es.yaw = e.yaw;
+        es.anim = e.anim;
+        es.hp = 255;
+        es.gore = e.gore;
         state.enemies.set(e.id, es);
+        continue;
       } else {
         // Farther enemies update less often (§6.10, §7 bandwidth): clients interpolate.
-        const every = e.nearest < 15 ? 2 : e.nearest < 45 ? 3 : e.nearest < 90 ? 4 : 8;
+        const every = e.nearest < 15 ? 2 : e.nearest < 45 ? 4 : e.nearest < 90 ? 6 : 10;
         if (e.anim === es.anim && e.gore === es.gore && (tick + Number(e.id)) % every !== 0)
           continue;
       }
-      es.frame = e.frame;
-      es.x = e.x;
-      es.z = e.z;
+      if (es.frame !== e.frame) es.frame = e.frame;
+      // Only touch fields that moved enough to matter (each write costs bytes).
+      if (Math.abs(es.x - e.x) > 0.01) es.x = e.x;
+      if (Math.abs(es.z - e.z) > 0.01) es.z = e.z;
       // On the ground clients take the height from the terrain; only send it on the train.
       if (e.frame !== 0) es.y = e.y;
       // Small turns aren't worth the bytes.
       if (Math.abs(Math.atan2(Math.sin(e.yaw - es.yaw), Math.cos(e.yaw - es.yaw))) > 0.07)
         es.yaw = e.yaw;
-      es.anim = e.anim;
-      es.hp = Math.max(0, Math.round((255 * e.hp) / e.def.hp));
-      es.gore = e.gore;
+      if (es.anim !== e.anim) es.anim = e.anim;
+      const hp = Math.max(0, Math.round((255 * e.hp) / e.def.hp));
+      if (es.hp !== hp) es.hp = hp;
+      if (es.gore !== e.gore) es.gore = e.gore;
     }
     for (const id of [...state.enemies.keys()]) {
       if (!sim.enemySystem.enemies.has(id)) {
