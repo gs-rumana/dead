@@ -856,17 +856,17 @@ export class Sim {
 
   // ---------- Health (§4.9) ----------
 
-  damagePlayer(p: SimPlayer, dmg: number, fromX: number, fromZ: number, _by: string): void {
+  damagePlayer(p: SimPlayer, dmg: number, fromX: number, fromZ: number, by: string): void {
     if (p.life !== Life.Alive || !p.connected || this.devGod || this.over) return;
     p.hp -= dmg;
     p.lastHurt = this.time;
     this.events.push({
       ev: { e: 'hurt', id: p.id, dmg: Math.round(dmg), fx: fromX - p.wx, fz: fromZ - p.wz },
     });
-    if (p.hp <= 0) this.down(p);
+    if (p.hp <= 0) this.down(p, this.enemySystem.enemies.get(by)?.type ?? (by === 'train' ? 'train' : by ? 'other' : ''));
   }
 
-  private down(p: SimPlayer): void {
+  private down(p: SimPlayer, cause = ''): void {
     if (p.carry) this.items.drop(p, false);
     if (p.motor.frame >= Frame.Handcar) this.leaveHandcar(p);
     p.hp = 0;
@@ -880,7 +880,7 @@ export class Sim {
       m.driving = false;
       if (this.train.driver === p.id) this.train.driver = '';
     }
-    this.events.push({ ev: { e: 'downed', id: p.id } });
+    this.events.push({ ev: { e: 'downed', id: p.id, ...(cause ? { cause } : {}) } });
   }
 
   private downedNear(p: SimPlayer): SimPlayer | null {

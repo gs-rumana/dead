@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import type { WeaponId } from '@dead-tracks/shared';
 import { MeshBuilder } from '../render/builder.ts';
-import { paletteMaterial } from '../render/materials.ts';
+import { paletteMaterial, releaseObject } from '../render/materials.ts';
 import { weaponModel } from '../render/models/weapons.ts';
 
 /**
@@ -40,7 +40,7 @@ export class Viewmodel {
   setWeapon(id: string): void {
     if (id === this.weapon) return;
     this.weapon = id;
-    if (this.gun) this.root.remove(this.gun);
+    if (this.gun) releaseObject(this.gun, false);
     this.gun = null;
     const model = weaponModel(id as WeaponId);
     if (!model) return;

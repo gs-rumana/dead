@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { type Swatch, swatchUV } from '../palette.ts';
+import { releaseObject } from '../materials.ts';
 import { weaponModel } from './weapons.ts';
 
 /**
@@ -369,7 +370,7 @@ export class Humanoid {
   setHeld(id: string, material: THREE.Material): void {
     if (id === this.heldId) return;
     this.heldId = id;
-    if (this.heldMesh) this.bones.handR.remove(this.heldMesh);
+    if (this.heldMesh) releaseObject(this.heldMesh, false);
     this.heldMesh = null;
     const model = id ? weaponModel(id) : null;
     if (!model) return;

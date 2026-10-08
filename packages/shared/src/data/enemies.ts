@@ -169,9 +169,9 @@ export const ENEMIES: Record<EnemyType, EnemyDef> = {
     hp: 2200,
     speed: 3,
     chaseSpeed: 6.5,
-    damage: 28,
+    damage: 20,
     attackRange: 1.8,
-    attackInterval: 0.8,
+    attackInterval: 1.1,
     sight: 80,
     boards: false,
     scale: 1.1,
@@ -203,11 +203,11 @@ export function bossHp(type: EnemyType, players: number): number {
 export const DIRECTOR = {
   /** Hard cap of active enemies per room. */
   maxEnemies: 80,
-  /** Base enemies kept around the party by day and by night. */
+  /** Base enemies kept around a two-player party by day and by night. */
   dayBudget: 10,
-  nightBudget: 42,
-  /** Extra budget per additional player. */
-  perPlayer: 0.35,
+  nightBudget: 26,
+  /** Budget multiplier by party size (1–4 players): solo nights stay survivable. */
+  partyScale: [0.7, 1, 1.3, 1.6],
   /** Growth per HUD km travelled (later is harder). */
   perKm: 0.012,
   /** Noise adds budget for a while (gunshots, whistle). */

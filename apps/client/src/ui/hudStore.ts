@@ -67,6 +67,8 @@ export const hud = {
   pingWheel: { open: false, sel: -1 },
   /** Subtitles for important sounds (§4.15). */
   subs: [] as Array<{ id: number; text: string; until: number }>,
+  /** Touch devices: audio waits for the first tap (§8). */
+  tapToStart: false,
   /** Your class name (§4.11). */
   className: '',
   /** Bonds this run earned (shown on the results screen). */

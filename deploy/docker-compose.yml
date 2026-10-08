@@ -10,6 +10,8 @@ services:
       - JWT_SECRET=${JWT_SECRET}
       - CLIENT_URL=${CLIENT_URL}
       - PUBLIC_URL=https://${SERVER_DOMAIN}
+      # Optional crash reports (§10).
+      - SENTRY_DSN=${SENTRY_DSN:-}
       # Optional sign-in providers: leave empty to hide a button.
       - DISCORD_CLIENT_ID=${DISCORD_CLIENT_ID:-}
       - DISCORD_CLIENT_SECRET=${DISCORD_CLIENT_SECRET:-}

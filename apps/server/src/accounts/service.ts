@@ -187,6 +187,21 @@ export class Accounts {
     if (bonds > 0) await this.log(row.id, bonds, reason);
   }
 
+  /** Anonymous stats (§10): small JSON blobs, capped. */
+  recordStats(session: string, events: Array<{ kind: string; data: unknown }>): number {
+    const insert = this.raw.prepare('INSERT INTO stats (session, kind, data, at) VALUES (?, ?, ?, ?)');
+    let n = 0;
+    const now = Date.now();
+    for (const ev of events.slice(0, 20)) {
+      if (!ev || typeof ev.kind !== 'string' || !/^[a-z_]{2,24}$/.test(ev.kind)) continue;
+      const data = JSON.stringify(ev.data ?? {});
+      if (data.length > 4096) continue;
+      insert.run(session.slice(0, 40), ev.kind, data, now);
+      n++;
+    }
+    return n;
+  }
+
   /** Development servers only: grant bonds for testing (§12). */
   async devGrant(row: UserRow, bonds: number): Promise<Profile> {
     await this.addProgress(row, Math.max(0, Math.min(500, bonds | 0)), {}, 'dev-grant');

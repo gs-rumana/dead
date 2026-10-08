@@ -157,6 +157,7 @@ export function SettingsPanel({
           {check('Colorblind-safe markers', 'colorblindMarkers')}
           {check('Camera shake', 'cameraShake')}
           {check('Gore', 'gore')}
+          {check('Vibration (Android)', 'haptics')}
         </>
       )}
     </div>

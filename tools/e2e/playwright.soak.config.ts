@@ -1,9 +1,9 @@
 import { defineConfig, devices } from '@playwright/test';
 
-/** Soak and performance runs against a production build (no HMR, real bundle). */
+/** Soak, performance and production-only (PWA, offline) runs against a real build. */
 export default defineConfig({
   testDir: './tests',
-  testMatch: /soak\.spec\.ts/,
+  testMatch: /(soak|prod)\.spec\.ts/,
   outputDir: './out/soak-results',
   workers: 1,
   reporter: [['list']],

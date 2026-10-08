@@ -16,6 +16,7 @@
     "@dead-tracks/shared": "workspace:*",
     "@dead-tracks/sim": "workspace:*",
     "@dimforge/rapier3d-compat": "^0.21.0",
+    "@sentry/browser": "^11.5.0",
     "preact": "^10.29.8",
     "three": "^0.186.1"
   },

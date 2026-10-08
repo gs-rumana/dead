@@ -54,6 +54,11 @@ export class Bot {
     this.attach();
   }
 
+  /** Development-server commands (load tests). */
+  dev(action: string, value?: number): void {
+    this.room.send('cmd', value === undefined ? { t: 'dev', action } : { t: 'dev', action, value });
+  }
+
   private attach(): void {
     this.room.onStateChange(() => this.patches++);
     this.room.onMessage('*', () => {});

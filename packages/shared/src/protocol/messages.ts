@@ -101,7 +101,8 @@ export type GameEvent =
   | { e: 'explode'; x: number; y: number; z: number; r: number; holy: boolean }
   /** A player took damage (camera shake, red flash). */
   | { e: 'hurt'; id: string; dmg: number; fx: number; fz: number }
-  | { e: 'downed'; id: string }
+  /** `cause`: enemy type, 'train', 'fall' or '' (for the anonymous death stats, §10). */
+  | { e: 'downed'; id: string; cause?: string }
   | { e: 'revived'; id: string; by: string }
   | { e: 'died'; id: string }
   | { e: 'respawned'; id: string }

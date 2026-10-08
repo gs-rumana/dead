@@ -10,7 +10,7 @@ import {
   tileKey,
   tileProps,
 } from '@dead-tracks/shared';
-import { paletteMaterial, terrainMaterial } from '../render/materials.ts';
+import { paletteMaterial, releaseObject, terrainMaterial } from '../render/materials.ts';
 import { PROP_KINDS, buildProp } from '../render/models/props.ts';
 import type { QualitySettings } from '../core/quality.ts';
 import { terrainColor } from './terrainColor.ts';
@@ -117,8 +117,7 @@ export class TerrainStreamer {
     }
     for (const [key, t] of this.tiles) {
       if (!keep.has(key)) {
-        this.worldRoot.remove(t.mesh);
-        t.mesh.geometry.dispose();
+        releaseObject(t.mesh);
         this.tiles.delete(key);
         this.propsDirty = true;
       }
@@ -349,10 +348,7 @@ export class TerrainStreamer {
   }
 
   dispose(): void {
-    for (const t of this.tiles.values()) {
-      this.worldRoot.remove(t.mesh);
-      t.mesh.geometry.dispose();
-    }
+    for (const t of this.tiles.values()) releaseObject(t.mesh);
     this.tiles.clear();
     this.worldRoot.remove(this.propRoot);
   }

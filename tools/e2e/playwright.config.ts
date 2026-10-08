@@ -6,6 +6,8 @@ import { defineConfig, devices } from '@playwright/test';
  */
 export default defineConfig({
   testDir: './tests',
+  // Production-only checks (service worker, bundle size) run under playwright.soak.config.ts.
+  testIgnore: /prod\.spec\.ts/,
   outputDir: './out/results',
   timeout: 60_000,
   fullyParallel: false,

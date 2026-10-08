@@ -364,6 +364,13 @@ export function Hud({ onMenu, onLeave }: { onMenu: () => void; onLeave: () => vo
         </button>
       )}
 
+      {hud.touch && hud.tapToStart && (
+        <div class="click-to-play" data-testid="tap-to-start">
+          <b>Tap to start</b>
+          <span>Left side: move · right side: look</span>
+        </div>
+      )}
+      {hud.touch && <div class="rotate-hint">Turn your phone sideways</div>}
       {!hud.touch && !hud.pointerLocked && (
         <div class="click-to-play" data-testid="click-to-play">
           <b>Click to play</b>

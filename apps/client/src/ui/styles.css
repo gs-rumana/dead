@@ -1491,3 +1491,80 @@ button.link {
   text-transform: uppercase;
   color: var(--accent);
 }
+
+/* ---------------- M8: mobile ---------------- */
+.rotate-hint {
+  display: none;
+}
+
+@media (orientation: portrait) and (pointer: coarse) {
+  .rotate-hint {
+    display: flex;
+    position: absolute;
+    inset: 0;
+    align-items: center;
+    justify-content: center;
+    background: rgba(16, 12, 9, 0.92);
+    font-size: 20px;
+    font-weight: 650;
+    pointer-events: auto;
+    z-index: 5;
+  }
+}
+
+.pwa-note {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+  color: var(--ink-dim);
+}
+
+.menu-links {
+  display: flex;
+  gap: 14px;
+  justify-content: center;
+  font-size: 13px;
+}
+
+.menu-links a.link {
+  color: var(--accent);
+}
+
+.info {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.info p {
+  margin: 0 0 10px;
+}
+
+.info ul {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  color: var(--ink-dim);
+}
+
+/* Phones in landscape: keep the menu's buttons in view. */
+@media (max-height: 520px) {
+  .menu.main h1 {
+    font-size: 2.2rem;
+    margin-top: 0;
+  }
+
+  .menu.main .tagline {
+    margin-bottom: 0.4rem;
+  }
+
+  .menu-body {
+    flex-direction: row-reverse;
+    flex-wrap: nowrap;
+    gap: 12px;
+  }
+
+  .menu-col.actions {
+    flex: 0 0 220px;
+  }
+}

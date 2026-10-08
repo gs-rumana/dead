@@ -9,6 +9,8 @@ import { gameServer, loadRegions } from '../net/regions.ts';
 import { LobbyScreen } from './Lobby.tsx';
 import { AgeGate, ClassPicker, ProfileCard, ageConfirmed } from './MainMenu.tsx';
 import { SettingsPanel } from './Settings.tsx';
+import { Credits, PrivacyNotice } from './Info.tsx';
+import { applyUpdate, enterFullscreen, hideIosTip, install, pwa } from '../core/pwa.ts';
 import { isTouchDevice } from '../core/quality.ts';
 import { Hud } from './Hud.tsx';
 import { DevPanel, PauseMenu, useMenuKeys } from './Menus.tsx';
@@ -39,6 +41,8 @@ export function App({ onStart }: Props) {
   const [devOpen, setDevOpen] = useState(config.dev);
   const [bagOpen, setBagOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [info, setInfo] = useState<'' | 'credits' | 'privacy'>('');
+  useEffect(() => pwa.on(() => rerender((x) => x + 1)), []);
   const [menuSettings] = useState(() => loadSettings());
   const [cls, setClsState] = useState<ClassId>(() => menuSettings.cls);
   const [, rerender] = useState(0);
@@ -100,6 +104,8 @@ export function App({ onStart }: Props) {
   };
 
   const start = async (mode: StartMode) => {
+    // Phones: fullscreen and landscape for the run (needs this tap, §8).
+    if (isTouchDevice()) enterFullscreen();
     setBusy(true);
     setError('');
     try {
@@ -274,6 +280,37 @@ export function App({ onStart }: Props) {
           <button class="secondary" data-testid="menu-settings" onClick={() => setSettingsOpen(true)}>
             Settings
           </button>
+          {pwa.updateReady && (
+            <button data-testid="update-ready" onClick={applyUpdate}>
+              New version ready: reload
+            </button>
+          )}
+          {pwa.canInstall && (
+            <button class="secondary" data-testid="install" onClick={() => void install()}>
+              Install the app
+            </button>
+          )}
+          {pwa.iosTip && (
+            <div class="pwa-note" data-testid="ios-tip">
+              <span>For fullscreen, tap Share, then "Add to Home Screen".</span>
+              <button class="link" onClick={hideIosTip}>
+                OK
+              </button>
+            </div>
+          )}
+          <div class="menu-links">
+            <button class="link" data-testid="open-credits" onClick={() => setInfo('credits')}>
+              Credits
+            </button>
+            <button class="link" data-testid="open-privacy" onClick={() => setInfo('privacy')}>
+              Privacy
+            </button>
+            {import.meta.env.VITE_SPONSORS_URL && (
+              <a class="link" href={import.meta.env.VITE_SPONSORS_URL as string} target="_blank" rel="noreferrer">
+                Sponsor
+              </a>
+            )}
+          </div>
           {error && (
             <p class="error" data-testid="error">
               {error}
@@ -281,6 +318,15 @@ export function App({ onStart }: Props) {
           )}
         </div>
       </div>
+      {info && (
+        <div class="overlay interactive" onClick={(e) => e.target === e.currentTarget && setInfo('')}>
+          <div class="panel wide">
+            <h2>{info === 'credits' ? 'Credits' : 'Privacy'}</h2>
+            {info === 'credits' ? <Credits /> : <PrivacyNotice />}
+            <button onClick={() => setInfo('')}>Close</button>
+          </div>
+        </div>
+      )}
       {settingsOpen && (
         <div class="overlay interactive" onClick={(e) => e.target === e.currentTarget && setSettingsOpen(false)}>
           <div class="panel wide">

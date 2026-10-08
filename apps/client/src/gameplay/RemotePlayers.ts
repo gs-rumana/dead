@@ -10,7 +10,7 @@ import {
   trainToWorld,
   trainYawAt,
 } from '@dead-tracks/shared';
-import { paletteMaterial, paletteSkinnedMaterial } from '../render/materials.ts';
+import { paletteMaterial, paletteSkinnedMaterial, releaseObject } from '../render/materials.ts';
 import { type Humanoid, OUTFITS, createHumanoid } from '../render/models/humanoid.ts';
 
 interface Snapshot {
@@ -91,7 +91,7 @@ export class RemotePlayers {
     });
     for (const [id, r] of this.remotes) {
       if (!seen.has(id)) {
-        this.scene.remove(r.body.mesh);
+        releaseObject(r.body.mesh, false);
         this.remotes.delete(id);
       }
     }

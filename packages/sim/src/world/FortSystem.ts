@@ -70,7 +70,7 @@ export class FortSystem {
     }
     if (this.checkpoint === Checkpoint.Active) {
       this.checkpointT -= dt;
-      this.waves(dt, this.ironwood!, 2.2, 3);
+      this.waves(dt, this.ironwood!, 2.6, this.waveSize(3));
       if (this.checkpointT <= 0) {
         this.checkpoint = Checkpoint.Done;
         for (const p of sim.players.values()) p.inv.cash += 25;
@@ -80,7 +80,7 @@ export class FortSystem {
     // Fort Haven: winch, hold, roll through.
     if (this.finale === Finale.Winching && this.haven) {
       this.winch = Math.min(1, this.winch + dt / WINCH_SECONDS);
-      this.waves(dt, this.haven, 1.6, 4);
+      this.waves(dt, this.haven, 2.4, this.waveSize(4));
       if (this.winch >= 1) {
         this.finale = Finale.Open;
         const g = fortGate(this.haven);
@@ -110,6 +110,12 @@ export class FortSystem {
     this.sim.broadcast('The winch groans. Hold them off until the gate is up!');
   }
 
+  /** Waves grow with the party: a solo defender faces about a third of a full party's. */
+  private waveSize(full: number): number {
+    const n = [...this.sim.players.values()].filter((p) => p.connected).length;
+    return Math.max(1, Math.round(full * ([0.35, 0.5, 0.75, 1][Math.max(0, Math.min(3, n - 1))] ?? 1)));
+  }
+
   /** Waves of the dead from outside the walls. */
   private waves(dt: number, fort: Structure, every: number, size: number): void {
     const sim = this.sim;
@@ -122,7 +128,7 @@ export class FortSystem {
       const a = sim.rng.range(0, Math.PI * 2);
       const r = FORT_HALF_LENGTH + sim.rng.range(12, 30);
       const p = toWorld(fort, Math.cos(a) * r * 0.75, 0, Math.sin(a) * r);
-      const type = sim.rng.chance(0.15) ? 'brute' : sim.rng.chance(0.35) ? 'runner' : 'walker';
+      const type = sim.rng.chance(0.06) ? 'brute' : sim.rng.chance(0.35) ? 'runner' : 'walker';
       const e = sim.enemySystem.spawn(type, p.x, p.z);
       e.state = 'alerted';
       e.goalX = fort.x;

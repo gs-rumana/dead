@@ -48,6 +48,15 @@ export const bondLog = sqliteTable('bond_log', {
   at: integer('at').notNull(),
 });
 
+/** Anonymous gameplay stats (§10): no account ids, a random per-visit session id. */
+export const stats = sqliteTable('stats', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  session: text('session').notNull(),
+  kind: text('kind').notNull(),
+  data: text('data').notNull(),
+  at: integer('at').notNull(),
+});
+
 /** Kept in step with the tables above (created on startup; no migration tool needed yet). */
 export const DDL = `
 CREATE TABLE IF NOT EXISTS users (
@@ -79,6 +88,14 @@ CREATE TABLE IF NOT EXISTS solo_runs (
   finished_at INTEGER,
   bonds INTEGER
 );
+CREATE TABLE IF NOT EXISTS stats (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  data TEXT NOT NULL,
+  at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS stats_kind ON stats (kind, at);
 CREATE TABLE IF NOT EXISTS bond_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   user_id TEXT NOT NULL,

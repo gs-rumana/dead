@@ -1,6 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { RAIL_TOP, type Route, WORLD, makeFrame } from '@dead-tracks/shared';
-import { paletteMaterial } from '../render/materials.ts';
+import { paletteMaterial, releaseObject } from '../render/materials.ts';
 import { MeshBuilder } from '../render/builder.ts';
 import { swatchUV, type Swatch } from '../render/palette.ts';
 import { buildMilepost, buildSleeper, buildTelegraphPole } from '../render/models/props.ts';
@@ -76,8 +76,7 @@ export class TrackStreamer {
     }
     for (const [i, c] of this.chunks) {
       if (!keep.has(i)) {
-        this.worldRoot.remove(c.mesh);
-        c.mesh.geometry.dispose();
+        releaseObject(c.mesh);
         this.chunks.delete(i);
         this.dirty = true;
       }

@@ -50,6 +50,8 @@ import { WeatherFx } from '../render/WeatherFx.ts';
 import { PING_ICONS, Pings } from '../gameplay/Pings.ts';
 import { CompassStrip, type CompassMark, MarkerLayer } from '../ui/overlay.ts';
 import { account } from '../net/account.ts';
+import { WakeLock, buzz } from './pwa.ts';
+import { deviceClass, flush as flushStats, track } from '../net/telemetry.ts';
 import { CameraRig } from '../gameplay/CameraRig.ts';
 import { Effects } from '../gameplay/Effects.ts';
 import { EnemyView } from '../gameplay/EnemyView.ts';
@@ -130,6 +132,19 @@ export class Game {
   /** World positions of route features for the compass. */
   private compassFeatures: Array<{ kind: string; name: string; x: number; z: number; s: number }> = [];
   private lastShotSub = 0;
+  private readonly wakeLock = new WakeLock();
+  /** Anonymous stats for this run (§10). */
+  private readonly runStats = {
+    started: 0,
+    fpsSamples: [] as number[],
+    nextFpsAt: 0,
+    deviceSent: false,
+    nextCurveKm: 0,
+    curve: [] as Array<[number, number, number, number]>,
+    towns: new Set<number>(),
+    nextTownCheck: 0,
+    ended: false,
+  };
   private terrainStreamer!: TerrainStreamer;
   private trackStreamer!: TrackStreamer;
   private trainView!: TrainView;
@@ -304,7 +319,9 @@ export class Game {
       }),
     );
     // Audio needs a user gesture (iOS: tap to start).
+    hud.tapToStart = isTouchDevice();
     const unlock = () => {
+      hud.tapToStart = false;
       if (!this.audio) {
         this.audio = new AudioEngine();
         this.audio.setVolumes(this.settings.masterVolume, this.settings.effectsVolume);
@@ -330,6 +347,16 @@ export class Game {
     this.running = true;
     this.last = performance.now();
     this.renderer.setAnimationLoop(this.frame);
+    // Keep the screen on during the run (§8).
+    void this.wakeLock.acquire();
+    this.runStats.started = performance.now();
+    this.runStats.nextFpsAt = performance.now() + 10_000;
+    track('run_start', {
+      mode: this.conn.kind,
+      players: this.conn.state.players.size,
+      cls: this.myClass,
+      tier: this.quality.tier,
+    });
     // Solo runs happen in this browser: the server notes the start so the claim can be checked.
     if (this.conn.kind === 'solo')
       void account.soloStart(this.conn.state.seed).then((id) => (this.soloRun.id = id));
@@ -366,6 +393,15 @@ export class Game {
 
   dispose(): void {
     this.claimSolo(false);
+    if (!this.runStats.ended) {
+      track('run_quit', {
+        mode: this.conn.kind,
+        km: Math.round((this.trainClock.s / WORLD.metersPerKm) * 10) / 10,
+        minutes: Math.round((performance.now() - this.runStats.started) / 6000) / 10,
+      });
+    }
+    flushStats();
+    this.wakeLock.release();
     this.markers.dispose();
     this.compass.dispose();
     this.running = false;
@@ -689,11 +725,20 @@ export class Game {
       case 'hurt':
         if (ev.id === self) {
           this.hurtFlash = Math.min(1, this.hurtFlash + ev.dmg / 30);
+          if (this.settings.haptics) buzz(Math.min(120, 30 + ev.dmg * 2));
           this.shakeT = Math.max(this.shakeT, 0.25);
           this.audio?.hurt();
         }
         break;
       case 'downed':
+        if (ev.id === self)
+          track('death', {
+            mode: this.conn.kind,
+            km: Math.round((this.trainClock.s / WORLD.metersPerKm) * 10) / 10,
+            cause: ev.cause ?? '',
+            night: this.sky.night > 0.5,
+            players: this.conn.state.players.size,
+          });
         toast(
           ev.id === self
             ? 'You are down! Hold E to use a tonic, or wait for a teammate.'
@@ -755,6 +800,41 @@ export class Game {
       }
     }
     if (this.settings.subtitles) this.subtitleFor(ev);
+  }
+
+  /** Samples for the anonymous stats: fps per device, fuel/cash curves, towns visited. */
+  private sampleStats(now: number): void {
+    const rs = this.runStats;
+    if (!rs.deviceSent && now >= rs.nextFpsAt) {
+      rs.fpsSamples.push(perf.fps);
+      rs.nextFpsAt = now + 2000;
+      if (rs.fpsSamples.length >= 25) {
+        rs.deviceSent = true;
+        const sorted = [...rs.fpsSamples].sort((a, b) => a - b);
+        track('device', {
+          ...deviceClass(),
+          tier: this.quality.tier,
+          backend: perf.backend,
+          dpr: Math.round(devicePixelRatio * 10) / 10,
+          w: innerWidth,
+          h: innerHeight,
+          fps: Math.round(sorted[Math.floor(sorted.length / 2)] ?? 0),
+          fpsLow: Math.round(sorted[Math.floor(sorted.length * 0.1)] ?? 0),
+        });
+      }
+    }
+    const km = this.trainClock.s / WORLD.metersPerKm;
+    if (km >= rs.nextCurveKm && rs.curve.length < 45) {
+      rs.nextCurveKm = Math.floor(km / 2) * 2 + 2;
+      const inv = this.conn.state.players.get(this.conn.selfId)?.inv;
+      const t = this.conn.state.train;
+      rs.curve.push([Math.round(km), Math.round(t.fuel), t.coal, inv?.cash ?? 0]);
+    }
+    if (now >= rs.nextTownCheck) {
+      rs.nextTownCheck = now + 3000;
+      const c = this.rig.worldPos;
+      for (const st of this.world.structuresNear(c.x, c.z, 60)) if (st.town !== undefined) rs.towns.add(st.town);
+    }
   }
 
   /** World markers, the compass strip and the Prospector's lantern (§4.11, §4.14, §4.15). */
@@ -1243,6 +1323,7 @@ export class Game {
     this.updateAudio(m.frame === Frame.Train, trainS);
 
     this.updateOverlay(now);
+    this.sampleStats(now);
 
     // Weather, sky, lights, shadows.
     const rs = this.conn.state;
@@ -1317,6 +1398,7 @@ export class Game {
       this.weapons.trigger(performance.now());
       const w = this.weapons.held();
       if (w?.kind === 'gun') this.viewmodel.fire(w.recoil);
+      if (w?.kind === 'gun' && this.settings.haptics && hud.touch) buzz(12);
       else if (w?.kind === 'melee') this.viewmodel.melee();
     }
     const keys = this.input.consumePressed();
@@ -1540,6 +1622,22 @@ export class Game {
         // Free the mouse for the results screen.
         if (document.pointerLockElement) document.exitPointerLock();
         if (this.conn.kind === 'solo') this.claimSolo(true);
+        if (!this.runStats.ended) {
+          const r = hud.result!;
+          this.runStats.ended = true;
+          track('run_end', {
+            mode: this.conn.kind,
+            players: st.players.size,
+            won: r.won,
+            km: Math.round(r.km * 10) / 10,
+            minutes: Math.round(r.minutes * 10) / 10,
+            landmarks: r.landmarks,
+            kills: r.kills,
+            towns: this.runStats.towns.size,
+            curve: this.runStats.curve,
+          });
+          flushStats();
+        }
         else {
           // The server paid out; show the estimate and refresh the total.
           const me = st.players.get(this.conn.selfId);

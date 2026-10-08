@@ -133,6 +133,20 @@ describe('accounts API', () => {
     expect((await call('GET', '/api/me', b.data.token)).data.id).toBe(pa.id);
   });
 
+  it('stores anonymous stats and rejects junk', async () => {
+    const ok = await call('POST', '/api/stats', '', {
+      session: 'abcdef1234567890',
+      events: [
+        { kind: 'run_end', data: { km: 42.5, won: false } },
+        { kind: 'death', data: { cause: 'werewolf' } },
+        { kind: 'Bad Kind!', data: {} },
+        { kind: 'big', data: { x: 'y'.repeat(5000) } },
+      ],
+    });
+    expect(ok.data.stored).toBe(2);
+    expect((await call('POST', '/api/stats', '', { session: 'x', events: [] })).status).toBe(400);
+  });
+
   it('signs in through a real provider shape (GitHub, mocked)', async () => {
     const providers = providersFromEnv({ GITHUB_CLIENT_ID: 'id', GITHUB_CLIENT_SECRET: 'secret' });
     expect(providers.map((p) => p.id)).toEqual(['github']);

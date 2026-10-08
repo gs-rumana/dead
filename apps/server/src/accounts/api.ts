@@ -75,6 +75,20 @@ export function createApi(o: ApiOptions) {
     return o.providers.find((p) => p.id === id) ?? null;
   };
 
+  const statsHits = new Map<string, { n: number; reset: number }>();
+  /** Stats: at most 240 posts per address per hour. */
+  const statsAllowed = (req: Request): boolean => {
+    const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'local';
+    const now = Date.now();
+    const e = statsHits.get(ip);
+    if (!e || e.reset < now) {
+      statsHits.set(ip, { n: 1, reset: now + 3600_000 });
+      if (statsHits.size > 10_000) statsHits.clear();
+      return true;
+    }
+    return ++e.n <= 240;
+  };
+
   /** Guests are cheap but not free: at most 30 new ones per address per hour. */
   const guestAllowed = (req: Request): boolean => {
     if (o.dev) return true;
@@ -124,6 +138,13 @@ export function createApi(o: ApiOptions) {
           dev: b.dev !== false,
         }),
       );
+    }
+    if (m === 'POST' && path === '/api/stats') {
+      if (!statsAllowed(req)) return fail(429, 'Slow down');
+      const b = await body(req);
+      const session = typeof b.session === 'string' ? b.session : '';
+      if (!/^[A-Za-z0-9_-]{8,40}$/.test(session) || !Array.isArray(b.events)) return fail(400, 'Bad stats');
+      return json({ stored: o.accounts.recordStats(session, b.events as Array<{ kind: string; data: unknown }>) });
     }
     if (m === 'POST' && path === '/api/dev/bonds' && o.dev) {
       const b = await body(req);

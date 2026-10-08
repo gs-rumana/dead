@@ -71,6 +71,8 @@ export interface Settings {
   keys: Record<Action, string>;
   /** Last class picked in the menu. */
   cls: ClassId;
+  /** Vibration on hits and shots (Android, §8). */
+  haptics: boolean;
 }
 
 const KEY = 'dead-tracks:settings';
@@ -91,6 +93,7 @@ const DEFAULTS: Settings = {
   name: '',
   keys: { ...DEFAULT_KEYS },
   cls: 'drifter',
+  haptics: true,
 };
 
 export function loadSettings(): Settings {

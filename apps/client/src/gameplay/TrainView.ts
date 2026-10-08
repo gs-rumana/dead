@@ -9,7 +9,7 @@ import {
   computeCarPoses,
   makeCarPoses,
 } from '@dead-tracks/shared';
-import { glowMaterial, paletteMaterial } from '../render/materials.ts';
+import { paletteMaterial } from '../render/materials.ts';
 import { itemGeometry } from '../render/models/items.ts';
 import {
   CRANK_RADIUS,
@@ -121,7 +121,11 @@ export class TrainView {
     this.headlamp = new THREE.SpotLight(0xffe2a8, 0, 140, 0.42, 0.55, 1.2);
     this.headlamp.castShadow = false;
     scene.add(this.headlamp, this.headlamp.target);
-    this.lampGlow = new THREE.Mesh(new THREE.CircleGeometry(0.2, 12), glowMaterial(0xffe6b0));
+    // Its own material: the colour is driven per frame below.
+    this.lampGlow = new THREE.Mesh(
+      new THREE.CircleGeometry(0.2, 12),
+      new THREE.MeshBasicNodeMaterial({ color: 0xffe6b0, fog: true }),
+    );
     scene.add(this.lampGlow);
     this.fireLight = new THREE.PointLight(0xff8a3a, 0, 9, 1.6);
     scene.add(this.fireLight);

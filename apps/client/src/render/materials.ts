@@ -30,6 +30,28 @@ export function terrainMaterial(): THREE.MeshLambertNodeMaterial {
 }
 
 /** Unlit glow for lamps, the firebox and windows at night. */
+const glows = new Map<string, THREE.MeshBasicNodeMaterial>();
+
 export function glowMaterial(color: THREE.ColorRepresentation): THREE.MeshBasicNodeMaterial {
-  return new THREE.MeshBasicNodeMaterial({ color, fog: true });
+  // Shared per colour: one pipeline, and nothing to leak when structures stream out.
+  const key = new THREE.Color(color).getHexString();
+  let m = glows.get(key);
+  if (!m) glows.set(key, (m = new THREE.MeshBasicNodeMaterial({ color, fog: true })));
+  return m;
+}
+
+/**
+ * Frees an object for good. three r186 keeps a mesh's render state (and through
+ * the shared material's listeners, the mesh itself) until the mesh is disposed,
+ * so removing it from the scene isn't enough.
+ */
+export function releaseObject(root: THREE.Object3D, disposeGeometry = true): void {
+  root.removeFromParent();
+  root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh && !(o as THREE.Points).isPoints && !(o as THREE.Line).isLine) return;
+    // Skinned characters share cached geometry.
+    if (disposeGeometry && m.geometry && !(m as THREE.SkinnedMesh).isSkinnedMesh) m.geometry.dispose();
+    (o as unknown as THREE.EventDispatcher<{ dispose: object }>).dispatchEvent({ type: 'dispose' });
+  });
 }

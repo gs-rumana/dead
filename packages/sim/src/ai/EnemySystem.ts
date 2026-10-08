@@ -746,6 +746,8 @@ export class EnemySystem {
     const sim = this.sim;
     const alive = players.filter((p) => p.life === 0 && p.connected);
     if (alive.length === 0) return;
+    // During a fort's checkpoint or the winch, the fort's own waves are the threat.
+    if (sim.forts.checkpoint === 1 || sim.forts.finale === 1) return;
     this.spawnAcc += dt;
     if (this.spawnAcc < DIRECTOR.spawnInterval) return;
     this.spawnAcc = 0;
@@ -841,7 +843,7 @@ export class EnemySystem {
         e.target = null;
         e.stateT = 0;
       }
-      e.hp = Math.min(e.maxHp, e.hp + e.maxHp * 0.02 * dt);
+      e.hp = Math.min(e.maxHp, e.hp + e.maxHp * 0.01 * dt);
       return false;
     }
     const dist = Math.hypot(target.wx - e.wx, target.wz - e.wz);
@@ -1019,7 +1021,7 @@ export class EnemySystem {
     const km = Math.max(0, sim.train.s / WORLD.metersPerKm);
     const n = sim.nightFactor;
     const base = DIRECTOR.dayBudget + (DIRECTOR.nightBudget - DIRECTOR.dayBudget) * n;
-    const party = 1 + DIRECTOR.perPlayer * Math.max(0, partySize - 1);
+    const party = DIRECTOR.partyScale[Math.max(0, Math.min(3, partySize - 1))] ?? 1;
     return Math.round(base * party * (1 + DIRECTOR.perKm * km) + this.noise);
   }
 

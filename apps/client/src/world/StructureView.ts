@@ -1,7 +1,12 @@
 import * as THREE from 'three/webgpu';
 import { type Piece, type Structure, type World, doorPose, fortGate, hashInts } from '@dead-tracks/shared';
 import { MeshBuilder } from '../render/builder.ts';
-import { glowMaterial, paletteMaterial, paletteSkinnedMaterial } from '../render/materials.ts';
+import {
+  glowMaterial,
+  paletteMaterial,
+  paletteSkinnedMaterial,
+  releaseObject,
+} from '../render/materials.ts';
 import { type Humanoid, OUTFITS, type Outfit, createHumanoid } from '../render/models/humanoid.ts';
 import type { Swatch } from '../render/palette.ts';
 
@@ -51,12 +56,7 @@ export class StructureView {
     }
     for (const [id, b] of this.built) {
       if (!want.has(id)) {
-        this.worldRoot.remove(b.group);
-        b.group.traverse((o) => {
-          const m = o as THREE.Mesh;
-          if (m.isMesh && m.geometry && !(m as THREE.SkinnedMesh).isSkinnedMesh)
-            m.geometry.dispose();
-        });
+        releaseObject(b.group);
         this.built.delete(id);
         continue;
       }

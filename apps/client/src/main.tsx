@@ -9,12 +9,19 @@ import { gameServer, loadRegions } from './net/regions.ts';
 import type { Connection } from './net/Connection.ts';
 import { WorkerConnection } from './net/WorkerConnection.ts';
 import { App, type StartMode } from './ui/App.tsx';
+import { setupPwa } from './core/pwa.ts';
+import { setupCrashReports } from './core/crash.ts';
+
+setupCrashReports();
+setupPwa();
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const ui = document.getElementById('ui') as HTMLElement;
 
 async function startGame(mode: StartMode, cls: ClassId): Promise<Game> {
-  await account.init();
+  // Solo never waits long on the server: it must work offline (§8).
+  if (mode.mode === 'solo') await Promise.race([account.init(), new Promise((r) => setTimeout(r, 1500))]);
+  else await account.init();
   const opts = {
     protocol: PROTOCOL_VERSION,
     cls,

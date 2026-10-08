@@ -1,4 +1,7 @@
 import {
+  Btn,
+  DAY,
+  DAY_CYCLE,
   ENEMY_TYPES,
   type Feature,
   type InputFrame,
@@ -38,6 +41,10 @@ export interface PilotOptions {
   dps: number;
   /** Seconds a town trip takes (handcar both ways plus shopping, §4.4). */
   townSeconds: number;
+  /** How far bots engage (m). */
+  reach: number;
+  /** Back away from attackers on foot. */
+  kite: boolean;
 }
 
 export const DEFAULT_PILOT: PilotOptions = {
@@ -47,7 +54,12 @@ export const DEFAULT_PILOT: PilotOptions = {
   god: true,
   dps: 40,
   townSeconds: 200,
+  reach: 32,
+  kite: false,
 };
+
+/** Closer to real players: misses, reloads and reaction time cost damage. */
+export const HUMAN_PILOT: PilotOptions = { ...DEFAULT_PILOT, god: false, dps: 24, reach: 25, kite: true };
 
 export interface PilotReport {
   won: boolean;
@@ -61,6 +73,10 @@ export interface PilotReport {
   /** Seconds spent with the firebox empty while trying to drive. */
   starvedSeconds: number;
   downs: number;
+  /** Bled out (respawned later at a station). */
+  deaths: number;
+  /** What downed the bots, e.g. "walker@night". */
+  causes: Record<string, number>;
   kills: number;
   landmarks: number;
   avgTickMs: number;
@@ -93,6 +109,8 @@ export class RunPilot {
     bodiesBurned: 0,
     starvedSeconds: 0,
     downs: 0,
+    deaths: 0,
+    causes: {},
     kills: 0,
     landmarks: 0,
     avgTickMs: 0,
@@ -138,6 +156,7 @@ export class RunPilot {
   /** One sim tick with idle inputs, the bots' fighting and the fireman. */
   private tick(): void {
     const sim = this.sim;
+    const reviving = this.reviveDowned();
     for (const p of this.players)
       sim.pushInput(p.id, {
         seq: ++this.seq,
@@ -145,7 +164,7 @@ export class RunPilot {
         my: 0,
         yaw: 0,
         pitch: 0,
-        buttons: 0,
+        buttons: reviving.has(p.id) ? Btn.Interact : 0,
         frame: p.motor.frame,
       } satisfies InputFrame);
     const t0 = now();
@@ -154,15 +173,30 @@ export class RunPilot {
     this.report.maxTickMs = Math.max(this.report.maxTickMs, ms);
     this.report.avgTickMs += ms;
     this.fight(SIM_DT);
+    this.kite(SIM_DT);
     this.fireman();
     for (const p of this.players) {
       const before = this.lastLife.get(p.id) ?? Life.Alive;
       if (p.life === Life.Downed && before !== Life.Downed) this.report.downs++;
       this.lastLife.set(p.id, p.life);
-      if (p.hp < 45 && p.inv.bandage > 0 && p.life === Life.Alive) sim.command(p.id, { t: 'heal' });
+      if (p.hp < 45 && (p.inv.bandage > 0 || p.inv.tonic > 0) && p.life === Life.Alive)
+        sim.command(p.id, { t: 'heal' });
+      // Alone and down: drink the tonic (§4.9).
+      if (p.life === Life.Downed && p.inv.tonic > 0 && this.players.every((q) => q === p || q.life !== Life.Alive))
+        sim.command(p.id, { t: 'heal' });
+      if (p.life === Life.Dead && before !== Life.Dead) this.report.deaths++;
     }
-    sim.drainEvents();
+    for (const { ev } of sim.drainEvents()) {
+      if (ev.e === 'downed' && this.ids.includes(ev.id)) {
+        const key = `${ev.cause || '?'}${sim.isNight ? '@night' : '@day'}`;
+        this.report.causes[key] = (this.report.causes[key] ?? 0) + 1;
+        this.log(`down: ${key}, ${sim.enemySystem.alive} enemies, ${this.phase}`);
+      }
+    }
   }
+
+  /** What the party is doing (for the log). */
+  private phase = 'drive';
 
   private wait(seconds: number, until?: () => boolean): void {
     const n = Math.round(seconds / SIM_DT);
@@ -172,16 +206,98 @@ export class RunPilot {
     }
   }
 
+  /** A teammate with meds runs over and holds E on whoever is down. Returns who is reviving. */
+  private reviveDowned(): Set<string> {
+    const out = new Set<string>();
+    for (const down of this.players) {
+      if (down.life !== Life.Downed) continue;
+      const helper = this.players.find(
+        (q) => q.life === Life.Alive && !out.has(q.id) && (q.inv.bandage > 0 || q.inv.tonic > 0),
+      );
+      if (!helper) continue;
+      // Getting there takes a few seconds: model it as a short wait before the hold.
+      const near = Math.hypot(helper.wx - down.wx, helper.wz - down.wz) < 2;
+      if (!near) {
+        const delay = (this.reviveDelay.get(down.id) ?? 0) + SIM_DT;
+        this.reviveDelay.set(down.id, delay);
+        if (delay < 4) continue;
+        helper.motor.frame = down.motor.frame;
+        helper.motor.x = down.motor.x + 0.8;
+        helper.motor.y = down.motor.y;
+        helper.motor.z = down.motor.z;
+      }
+      this.reviveDelay.delete(down.id);
+      out.add(helper.id);
+    }
+    return out;
+  }
+
+  private readonly reviveDelay = new Map<string, number>();
+
+  /**
+   * On foot, bots back away from anything about to hit them, as players do
+   * (running speed beats most of the dead). Movement is applied straight to the
+   * motor: a stand-in for steering with the stick.
+   */
+  private kite(dt: number): void {
+    const sim = this.sim;
+    if (!this.opts.kite) return;
+    for (const p of this.players) {
+      if (p.life !== Life.Alive || p.motor.frame !== 0) continue;
+      let ax = 0;
+      let az = 0;
+      for (const e of sim.enemySystem.enemies.values()) {
+        if (e.state === 'dead' || e.frame !== 0) continue;
+        const dx = p.wx - e.wx;
+        const dz = p.wz - e.wz;
+        const d = Math.hypot(dx, dz);
+        const danger = e.def.attackRange + 2.5 * e.def.scale;
+        if (d < danger && d > 0.01) {
+          ax += (dx / d) * (danger - d);
+          az += (dz / d) * (danger - d);
+        }
+      }
+      // Stay inside an awake boss's grounds, or it walks home and heals.
+      for (const lm of sim.landmarks.list) {
+        const b = sim.enemySystem.enemies.get(lm.bossId);
+        if (!b || b.state === 'dead') continue;
+        const hx = b.homeX - p.wx;
+        const hz = b.homeZ - p.wz;
+        const hd = Math.hypot(hx, hz);
+        if (hd > 30) {
+          ax += (hx / hd) * (hd - 30) * 0.5;
+          az += (hz / hd) * (hd - 30) * 0.5;
+        }
+      }
+      const l = Math.hypot(ax, az);
+      if (l < 0.01) continue;
+      const step = Math.min(l, 5 * dt);
+      const nx = p.motor.x + (ax / l) * step;
+      const nz = p.motor.z + (az / l) * step;
+      p.motor.x = nx;
+      p.motor.z = nz;
+      p.motor.y = Math.max(p.motor.y, sim.terrain.height(nx, nz));
+    }
+  }
+
+  /** Night now, or within a minute. */
+  private nightSoon(): boolean {
+    const sim = this.sim;
+    const t = (sim.time + DAY.startOffset * DAY.dayLength) % DAY_CYCLE;
+    return t >= DAY.dayLength - 60;
+  }
+
   /** Each bot shoots the nearest enemy within reach. */
   private fight(dt: number): void {
     const sim = this.sim;
     for (const p of this.players) {
       if (p.life !== Life.Alive) continue;
       let best = null as null | ReturnType<typeof sim.enemySystem.enemies.get>;
-      let bd = 32;
+      let bd = this.opts.reach;
       for (const e of sim.enemySystem.enemies.values()) {
         if (e.state === 'dead') continue;
-        const d = Math.hypot(e.wx - p.wx, e.wz - p.wz);
+        // Bosses get focus fire unless something is right on top of you.
+        const d = Math.hypot(e.wx - p.wx, e.wz - p.wz) * (isBoss(e.type) ? 0.3 : 1);
         if (d < bd) {
           bd = d;
           best = e;
@@ -444,6 +560,13 @@ export class RunPilot {
     while (!sim.forts.result && sim.time - t0 < maxMinutes * 60 && !sim.over) {
       const stop = this.plan[this.next];
       if (!stop) break;
+      // Sensible parties don't park in the dark (§4.3): skip stations at night,
+      // and wait for daylight before a raid.
+      if (this.opts.kite && (stop.kind === 'station' || stop.kind === 'town' || stop.kind === 'landmark') && this.nightSoon()) {
+        this.log(`skipping ${stop.f.name} (night)`);
+        this.next++;
+        continue;
+      }
       const target =
         stop.kind === 'checkpoint'
           ? stop.f.s
@@ -454,6 +577,7 @@ export class RunPilot {
               : stop.kind === 'town'
                 ? stop.f.s + 20
                 : stop.f.s + 10;
+      this.phase = 'drive';
       this.driveTo(target);
       if (Math.abs(sim.train.s - target) > 40) {
         this.log(`stalled before ${stop.f.name} (fuel ${sim.train.fuel.toFixed(0)}, coal ${sim.train.coal})`);
@@ -461,6 +585,7 @@ export class RunPilot {
       }
       this.report.stops++;
       this.next++;
+      this.phase = stop.kind;
       switch (stop.kind) {
         case 'station':
           this.log(`station ${stop.f.name}`);
@@ -510,7 +635,6 @@ export class RunPilot {
     r.avgTickMs /= Math.max(1, sim.tick);
     this.log(r.won ? 'won' : 'ended');
     void ENEMY_TYPES;
-    void isBoss;
     return r;
   }
 }

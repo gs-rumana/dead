@@ -87,6 +87,17 @@ function build(kind: ItemKind): THREE.BufferGeometry {
         );
       b.box('iron', 0, 0.3, 0, 0.6, 0.04, 0.04);
       break;
+    case 'trolley_kit':
+      // A flat-packed trolley: deck boards, two axles with wheels, a rope.
+      b.box('woodLight', 0, 0.06, 0, 0.9, 0.08, 0.6);
+      b.box('wood', 0, 0.12, -0.2, 0.9, 0.04, 0.12);
+      b.box('wood', 0, 0.12, 0.2, 0.9, 0.04, 0.12);
+      for (const x of [-0.3, 0.3]) {
+        b.cylinder('iron', x, 0.2, 0, 0.025, 0.025, 0.62, 6, { rx: Math.PI / 2 });
+        for (const z of [-0.28, 0.28]) b.cylinder('steel', x, 0.2, z, 0.11, 0.11, 0.05, 10, { rx: Math.PI / 2 });
+      }
+      b.box('leather', 0, 0.16, 0, 0.04, 0.12, 0.64);
+      break;
     case 'lumber':
       for (let i = 0; i < 4; i++)
         b.box(

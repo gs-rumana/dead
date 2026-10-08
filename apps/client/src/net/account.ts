@@ -164,6 +164,7 @@ export class AccountClient {
 
   private async call<T>(method: string, path: string, body?: unknown): Promise<T> {
     const res = await fetch(this.base + path, {
+      signal: AbortSignal.timeout(8000),
       method,
       headers: {
         ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
