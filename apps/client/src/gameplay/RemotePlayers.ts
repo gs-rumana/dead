@@ -23,6 +23,7 @@ interface Snapshot {
   mantle: number;
   held: string;
   life: number;
+  carry: boolean;
 }
 
 interface Remote {
@@ -82,6 +83,7 @@ export class RemotePlayers {
         mantle: p.mantle,
         held: p.held,
         life: p.life,
+        carry: !!p.carry,
       });
       if (r.buf.length > 30) r.buf.shift();
     });
@@ -148,12 +150,19 @@ export class RemotePlayers {
         sprinting: (src.flags & PlayerFlag.Sprinting) !== 0,
         held: src.held,
         downed: src.life !== 0,
+        carrying: src.carry,
       });
     }
   }
 
   swing(id: string): void {
     this.remotes.get(id)?.body.swing();
+  }
+
+  /** Rendered world pose of a remote player (for carried items). */
+  pose(id: string): { x: number; y: number; z: number; yaw: number } | null {
+    const r = this.remotes.get(id);
+    return r ? { x: r.wx, y: r.wy, z: r.wz, yaw: r.body.mesh.rotation.y } : null;
   }
 
   worldPosition(id: string): { x: number; y: number; z: number } | null {

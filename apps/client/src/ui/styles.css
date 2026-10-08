@@ -833,3 +833,93 @@ button.secondary {
   left: max(12px, env(safe-area-inset-left));
   bottom: 90px;
 }
+
+/* ---------- Interaction and shops ---------- */
+.hold-hint {
+  color: var(--ink-dim);
+  font-weight: 500;
+}
+
+.bar.hold {
+  width: 160px;
+  margin: 6px auto 0;
+}
+
+.bar.hold > div {
+  background: var(--accent);
+}
+
+.carrying {
+  position: absolute;
+  left: 50%;
+  bottom: 70px;
+  transform: translateX(-50%);
+  padding: 4px 10px;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.5);
+  font-size: 13px;
+}
+
+.panel.shop {
+  width: min(420px, 94vw);
+}
+
+.panel h3 {
+  margin: 8px 0 2px;
+  font-size: 13px;
+  color: var(--ink-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.shop-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.shop-row button {
+  min-width: 64px;
+  padding: 0.35em 0.8em;
+}
+
+.cash {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.muted {
+  font-size: 12px;
+  color: var(--ink-dim);
+}
+
+.pack-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.pack-slot {
+  height: 48px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid #4a3b2c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 11px;
+}
+
+.bag-button {
+  position: absolute;
+  top: max(8px, env(safe-area-inset-top));
+  right: calc(max(10px, env(safe-area-inset-right)) + 50px);
+  width: 48px;
+  height: 40px;
+  padding: 0;
+  font-size: 12px;
+  background: rgba(0, 0, 0, 0.45);
+  color: var(--ink);
+}

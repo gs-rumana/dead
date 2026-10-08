@@ -1,9 +1,10 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { PLAYER } from '../data/player.ts';
-import { CONSIST, type CarLayout, GAP_PLATES } from '../vehicles/consist.ts';
+import { CONSIST, type CarLayout, GAP_PLATES, TRAIN_LADDERS } from '../vehicles/consist.ts';
 import type { CarPose } from '../vehicles/trainPose.ts';
 import { PROP_COLLIDERS, type Prop, tileProps } from '../worldgen/props.ts';
 import type { Terrain } from '../worldgen/terrain.ts';
+import type { Piece, Structure } from '../worldgen/structures.ts';
 import { TILE_RES, TILE_SIZE, tileHeights, tileKey } from '../worldgen/tiles.ts';
 
 export type Rapier = typeof RAPIER;
@@ -18,7 +19,7 @@ export function initPhysics(): Promise<Rapier> {
 }
 
 /** Collision groups: environment, train hull, and the character probe. */
-export const Group = { Env: 0x0001, Train: 0x0002, Probe: 0x0004 } as const;
+export const Group = { Env: 0x0001, Train: 0x0002, Probe: 0x0004, Ladder: 0x0008 } as const;
 export function groups(membership: number, filter: number): number {
   return ((membership & 0xffff) << 16) | (filter & 0xffff);
 }
@@ -54,6 +55,15 @@ export class PhysicsSpace {
   private readonly carBodies: RAPIER.RigidBody[] = [];
   private readonly trainColliderHandles = new Set<number>();
   private frameCounter = 0;
+  /** Structures whose colliders load with a tile (set by the owner of the World). */
+  structureSource: ((tx: number, tz: number) => Structure[]) | null = null;
+  /** Dynamic structure pieces (doors, boards) by "structureId:pieceId". */
+  private readonly pieces = new Map<
+    string,
+    { collider: RAPIER.Collider; st: Structure; piece: Piece; state: number }
+  >();
+  /** Last known dynamic state per piece, applied when its tile (re)loads. */
+  private readonly pieceStates = new Map<string, number>();
 
   constructor(
     R: Rapier,
@@ -78,6 +88,14 @@ export class PhysicsSpace {
         R.ColliderDesc.cuboid(c.hx, c.hy, c.hz)
           .setTranslation(c.x, c.y, c.z)
           .setCollisionGroups(groups(Group.Train, 0xffff)),
+      );
+    }
+    for (const c of TRAIN_LADDERS) {
+      this.train.createCollider(
+        R.ColliderDesc.cuboid(c.hx, c.hy, c.hz)
+          .setTranslation(c.x, c.y, c.z)
+          .setSensor(true)
+          .setCollisionGroups(groups(Group.Ladder, Group.Probe)),
       );
     }
 
@@ -182,6 +200,8 @@ export class PhysicsSpace {
       if (this.frameCounter - t.lastUsed > 90) {
         for (const c of t.colliders) this.ground.removeCollider(c, false);
         this.tiles.delete(key);
+        for (const [pk, p] of this.pieces)
+          if (t.colliders.includes(p.collider)) this.pieces.delete(pk);
       }
     }
   }
@@ -214,7 +234,74 @@ export class PhysicsSpace {
     pos.push({ x: cx, y: 0, z: cz });
     for (const prop of tileProps(this.terrain, tx, tz, 0))
       this.addPropCollider(prop, colliders, pos);
+    for (const st of this.structureSource?.(tx, tz) ?? []) this.addStructure(st, colliders, pos);
     this.tiles.set(key, { colliders, pos, x0, z0, lastUsed: this.frameCounter });
+  }
+
+  private addStructure(
+    st: Structure,
+    colliders: RAPIER.Collider[],
+    pos: Array<{ x: number; y: number; z: number }>,
+  ): void {
+    for (const p of st.pieces) {
+      if (!p.solid && p.kind !== 'ladder') continue;
+      const w = pieceWorld(st, p);
+      const desc = this.R.ColliderDesc.cuboid(p.hx, p.hy, p.hz)
+        .setTranslation(w.x - this.originX, w.y, w.z - this.originZ)
+        .setRotation(yawQuat(st.yaw + p.ry));
+      if (p.kind === 'ladder')
+        desc.setSensor(true).setCollisionGroups(groups(Group.Ladder, Group.Probe));
+      else desc.setCollisionGroups(groups(Group.Env, 0xffff));
+      const c = this.ground.createCollider(desc);
+      colliders.push(c);
+      pos.push(w);
+      if (p.kind === 'door' || p.kind === 'board') {
+        const key = `${st.id}:${p.id}`;
+        this.pieces.set(key, { collider: c, st, piece: p, state: 0 });
+        this.applyPiece(key, this.pieceStates.get(key) ?? 0);
+      }
+    }
+  }
+
+  /** Doors open (1) or close (0); boards break (1) (§4.8). */
+  setPieceState(key: string, state: number): void {
+    this.pieceStates.set(key, state);
+    this.applyPiece(key, state);
+  }
+
+  private applyPiece(key: string, state: number): void {
+    const e = this.pieces.get(key);
+    if (!e) return;
+    e.state = state;
+    const { st, piece } = e;
+    if (piece.kind === 'board') {
+      e.collider.setEnabled(state === 0);
+      return;
+    }
+    // Door: swing 90° about the hinge edge.
+    const w = doorPose(st, piece, state === 1 ? 1 : 0);
+    e.collider.setTranslation({ x: w.x - this.originX, y: w.y, z: w.z - this.originZ });
+    e.collider.setRotation(yawQuat(w.yaw));
+  }
+
+  /** True if the capsule at a feet position touches a ladder (§4.8). */
+  onLadder(world: 'ground' | 'train', x: number, y: number, z: number): boolean {
+    const w = world === 'ground' ? this.ground : this.train;
+    const ox = world === 'ground' ? this.originX : 0;
+    const oz = world === 'ground' ? this.originZ : 0;
+    let hit = false;
+    w.intersectionsWithShape(
+      { x: x - ox, y: y + PLAYER.radius + PLAYER.halfHeight, z: z - oz },
+      { x: 0, y: 0, z: 0, w: 1 },
+      new this.R.Capsule(PLAYER.halfHeight, PLAYER.radius + 0.1),
+      () => {
+        hit = true;
+        return false;
+      },
+      undefined,
+      groups(Group.Probe, Group.Ladder),
+    );
+    return hit;
   }
 
   private addPropCollider(
@@ -274,6 +361,39 @@ export class PhysicsSpace {
     this.ground.free();
     this.train.free();
   }
+}
+
+/** World position of a structure piece's centre. */
+export function pieceWorld(st: Structure, p: Piece): { x: number; y: number; z: number } {
+  const c = Math.cos(st.yaw);
+  const s = Math.sin(st.yaw);
+  return { x: st.x + c * p.x + s * p.z, y: st.y + p.y, z: st.z - s * p.x + c * p.z };
+}
+
+/** A door's centre and yaw when open by `t` (0 closed .. 1 open 90°). */
+export function doorPose(
+  st: Structure,
+  p: Piece,
+  t: number,
+): { x: number; y: number; z: number; yaw: number } {
+  // Hinge at the +x end of the door (in the door's own frame).
+  const ang = (p.hinge ?? 1) * t * (Math.PI / 2);
+  const cr = Math.cos(p.ry);
+  const sr = Math.sin(p.ry);
+  // Hinge point in structure-local coords.
+  const hx = p.x + cr * p.hx * (p.hinge ?? 1);
+  const hz = p.z - sr * p.hx * (p.hinge ?? 1);
+  // Door centre relative to the hinge, rotated.
+  const yaw = p.ry + ang;
+  const cx = hx - Math.cos(yaw) * p.hx * (p.hinge ?? 1);
+  const cz = hz + Math.sin(yaw) * p.hx * (p.hinge ?? 1);
+  const c = Math.cos(st.yaw);
+  const s = Math.sin(st.yaw);
+  return { x: st.x + c * cx + s * cz, y: st.y + p.y, z: st.z - s * cx + c * cz, yaw: st.yaw + yaw };
+}
+
+export function yawQuat(yaw: number): { x: number; y: number; z: number; w: number } {
+  return { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) };
 }
 
 /** Quaternion from an orthonormal basis given as columns right (X), up (Y), back (Z). */

@@ -22,6 +22,8 @@ import {
   Rng,
   Route,
   SIM_DT,
+  World,
+  type ItemKind,
   SURVIVAL,
   TRAIN_LENGTH,
   Terrain,
@@ -31,7 +33,6 @@ import {
   makeCarPoses,
   makeMotorState,
   nextFeature,
-  routeFeatures,
   smoothstep,
   stepMotor,
   trainToWorld,
@@ -40,6 +41,7 @@ import {
 import { EnemySystem, type SimEnemy } from './ai/EnemySystem.ts';
 import { Combat } from './combat/Combat.ts';
 import { type Inventory, addToHotbar, starterInventory } from './combat/inventory.ts';
+import { ItemSystem } from './items/ItemSystem.ts';
 import { TrainSim } from './train.ts';
 
 export interface SimOptions {
@@ -75,6 +77,8 @@ export interface SimPlayer {
   wx: number;
   wy: number;
   wz: number;
+  /** Item id carried in both hands ('' if none, §4.8). */
+  carry: string;
 }
 
 export interface OutEvent {
@@ -93,6 +97,7 @@ const TRAIN_START_S = 40;
 export class Sim {
   readonly seed: number;
   readonly rng: Rng;
+  readonly world: World;
   readonly route: Route;
   readonly terrain: Terrain;
   readonly features: Feature[];
@@ -102,6 +107,7 @@ export class Sim {
   readonly motorCtx: MotorContext;
   readonly enemySystem: EnemySystem;
   readonly combat: Combat;
+  readonly items: ItemSystem;
   tick = 0;
   time = 0;
   /** Night type for the current cycle (§4.5). M6 rolls the full set. */
@@ -121,14 +127,17 @@ export class Sim {
   private constructor(opts: SimOptions, space: (t: Terrain) => PhysicsSpace) {
     this.seed = opts.seed >>> 0;
     this.rng = new Rng(this.seed);
-    this.route = new Route(this.seed);
-    this.terrain = new Terrain(this.route);
-    this.features = routeFeatures(this.seed);
+    this.world = new World(this.seed);
+    this.route = this.world.route;
+    this.terrain = this.world.terrain;
+    this.features = this.world.features;
     this.space = space(this.terrain);
+    this.space.structureSource = (tx, tz) => this.world.structuresInTile(tx, tz);
     this.train = new TrainSim(TRAIN_START_S);
     this.motorCtx = { space: this.space, poses: this.poses, trainSpeed: 0 };
     this.enemySystem = new EnemySystem(this);
     this.combat = new Combat(this);
+    this.items = new ItemSystem(this);
     this.updateTrainPose();
   }
 
@@ -189,6 +198,7 @@ export class Sim {
       wx: 0,
       wy: 0,
       wz: 0,
+      carry: '',
     };
     this.players.set(id, p);
     this.updatePlayerWorld(p);
@@ -204,7 +214,14 @@ export class Sim {
     }
   }
 
+  /** A message for one player (events channel). */
+  toast(id: string, text: string): void {
+    this.events.push({ to: id, ev: { e: 'toast', text } });
+  }
+
   removePlayer(id: string): void {
+    const p = this.players.get(id);
+    if (p?.carry) this.items.drop(p, false);
     if (this.train.driver === id) this.train.driver = '';
     this.players.delete(id);
   }
@@ -261,11 +278,29 @@ export class Sim {
       case 'heal':
         this.heal(p);
         break;
+      case 'use':
+        if (typeof cmd.target === 'string') this.items.use(p, cmd.target.slice(0, 64), !!cmd.hold);
+        break;
+      case 'drop':
+        this.items.drop(p, !!cmd.throw);
+        break;
+      case 'buy':
+        if (typeof cmd.shop === 'string' && typeof cmd.kind === 'string')
+          this.items.buy(p, cmd.shop, cmd.kind as ItemKind);
+        break;
+      case 'sell':
+        if (typeof cmd.shop === 'string') this.items.sell(p, cmd.shop, Number(cmd.slot) | 0);
+        break;
+      case 'dropcash':
+        this.items.dropCash(p, Number(cmd.amount) || 0);
+        break;
       case 'respawn':
         if (p.life === Life.Alive) this.respawnOnTrain(p);
         break;
       case 'dev':
-        this.devCommand(p, cmd.action, cmd.value);
+        if (cmd.action === 'tp' && Number.isFinite(cmd.x) && Number.isFinite(cmd.z))
+          this.devTeleport(p, cmd.x!, cmd.y ?? NaN, cmd.z!);
+        else this.devCommand(p, cmd.action, cmd.value);
         break;
     }
   }
@@ -322,6 +357,33 @@ export class Sim {
         if (!p.inv.slots.includes('dynamite')) addToHotbar(p.inv, 'dynamite');
         break;
       }
+      case 'item': {
+        // Spawn an item at the player's feet (dev).
+        const kinds: ItemKind[] = [
+          'coal',
+          'plate',
+          'wire',
+          'crate',
+          'gold_bar',
+          'jewelry',
+          'chair',
+        ];
+        const kind = kinds[Math.max(0, Math.min(kinds.length - 1, value | 0))] as ItemKind;
+        const m = p.motor;
+        this.items.spawn(
+          kind,
+          m.frame,
+          m.x - Math.sin(m.yaw) * 1.2,
+          m.y + 0.3,
+          m.z - Math.cos(m.yaw) * 1.2,
+          0,
+          { flying: true },
+        );
+        break;
+      }
+      case 'cash':
+        p.inv.cash += value || 100;
+        break;
       case 'spawn': {
         // Spawn a pack in front of the player.
         const yaw = p.motor.yaw + (p.motor.frame === Frame.Train ? this.poses[0]!.yaw : 0);
@@ -386,6 +448,21 @@ export class Sim {
     }
   }
 
+  /** Dev: put a player at a world position (on the ground there if y is missing). */
+  private devTeleport(p: SimPlayer, x: number, y: number, z: number): void {
+    const m = p.motor;
+    m.frame = Frame.World;
+    m.x = x;
+    m.z = z;
+    m.y = Number.isFinite(y) ? y : this.terrain.height(x, z) + 0.2;
+    m.vx = m.vy = m.vz = 0;
+    m.mantle = 0;
+    m.driving = false;
+    if (this.train.driver === p.id) this.train.driver = '';
+    this.space.streamTiles([{ x, z }]);
+    this.updatePlayerWorld(p);
+  }
+
   private respawnOnTrain(p: SimPlayer): void {
     const m = p.motor;
     m.frame = Frame.Train;
@@ -432,6 +509,8 @@ export class Sim {
     this.enemySystem.step(dt);
     this.enemySystem.trainContacts();
     this.combat.stepProjectiles(dt);
+    // 7. Carrying and cargo.
+    this.items.step(dt);
 
     // Health, revives and respawns (§4.9).
     for (const p of this.players.values()) this.stepHealth(p, dt);
@@ -443,6 +522,7 @@ export class Sim {
       if (p.motor.frame === Frame.World) pts.push({ x: p.motor.x, z: p.motor.z });
     }
     for (const pr of this.combat.projectiles.values()) pts.push({ x: pr.x, z: pr.z });
+    for (const it of this.items.items.values()) if (it.flying) pts.push({ x: it.wx, z: it.wz });
     this.space.streamTiles(pts);
   }
 
@@ -513,6 +593,7 @@ export class Sim {
       return;
     }
     if (this.downedNear(p)) return; // Interact is busy reviving.
+    if (p.carry) return; // Hands full: the client names a target (furnace, cargo) instead.
     const target = findInteractable(
       m.frame,
       m.x,
@@ -546,6 +627,7 @@ export class Sim {
   }
 
   private down(p: SimPlayer): void {
+    if (p.carry) this.items.drop(p, false);
     p.hp = 0;
     p.life = Life.Downed;
     p.bleed = SURVIVAL.bleedOut;

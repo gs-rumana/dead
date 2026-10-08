@@ -7,6 +7,7 @@ import {
   DIRECTOR,
   ENEMIES,
   ENEMY_TYPES,
+  FORT,
   type EnemyDef,
   type EnemyType,
   Frame,
@@ -177,7 +178,11 @@ export class EnemySystem {
       e.nearest = nearest;
       if (e.state === 'dead') {
         e.deadT += dt;
-        if (e.deadT > 45 || nearest > DIRECTOR.despawn) this.enemies.delete(e.id);
+        // After the fall, the corpse becomes an item to burn, sell or search (§4.3).
+        if (e.deadT > 2.5) {
+          this.enemies.delete(e.id);
+          if (nearest < DIRECTOR.despawn) sim.items.addBody(e.type, e.frame, e.x, e.y, e.z, e.yaw);
+        }
         continue;
       }
       if (nearest > DIRECTOR.despawn && e.frame === Frame.World) {
@@ -369,6 +374,27 @@ export class EnemySystem {
     if (Math.abs(this.tmp.x) > 2.7 || this.tmp.z < 0.5 || this.tmp.z > TRAIN_LENGTH - 0.5) return;
     const side = this.tmp.x >= 0 ? 1 : -1;
     const tz = this.tmp.z;
+    // Fortifications (§4.3): plates stop climbers (brutes smash them), wire cuts them.
+    const fort = sim.items.fortAt(side, tz);
+    if (fort >= 0) {
+      if (sim.items.forts[fort] === 1) {
+        if (e.type === 'brute' && e.attackT <= 0) {
+          e.attackT = e.def.attackInterval;
+          e.anim = Anim.Attack;
+          sim.items.damageFort(fort, FORT.bruteDamage);
+        } else if (e.type !== 'brute') {
+          // Look for an unprotected stretch further along.
+          e.goalZ += sim.rng.chance(0.5) ? 6 : -6;
+        }
+        return;
+      }
+      e.hp -= FORT.wireDps * 0.5;
+      sim.items.damageFort(fort, 6);
+      if (e.hp <= 0) {
+        sim.killEnemy(e, '', 0, false);
+        return;
+      }
+    }
     const hit = sim.space.rayTrain(side * 0.9, 5, tz, 0, -1, 0, 6);
     if (!hit) return;
     const floor = 5 - hit.toi;

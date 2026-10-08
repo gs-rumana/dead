@@ -1,9 +1,11 @@
-import { useState } from 'preact/hooks';
+import { useEffect, useState } from 'preact/hooks';
 import type { Game } from '../core/Game.ts';
 import { config } from '../core/config.ts';
 import { isTouchDevice } from '../core/quality.ts';
 import { Hud } from './Hud.tsx';
 import { DevPanel, PauseMenu, useMenuKeys } from './Menus.tsx';
+import { BackpackPanel, ShopPanel } from './Shop.tsx';
+import { hud } from './hudStore.ts';
 import { PerfHud } from './PerfHud.tsx';
 import { TouchControls } from './TouchControls.tsx';
 
@@ -20,10 +22,33 @@ export function App({ onStart }: Props) {
   const [code, setCode] = useState(config.code);
   const [paused, setPaused] = useState(false);
   const [devOpen, setDevOpen] = useState(config.dev);
+  const [bagOpen, setBagOpen] = useState(false);
+  const [, rerender] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => rerender((x) => x + 1), 150);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === 'Tab' && game) {
+        e.preventDefault();
+        setBagOpen((b) => {
+          if (!b && document.pointerLockElement) document.exitPointerLock();
+          return !b;
+        });
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      clearInterval(id);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [game]);
   useMenuKeys(
     () => {
       if (!game) return;
-      // Browsers release pointer lock on Esc themselves; open the menu either way.
+      // Esc closes an open panel first; otherwise toggles the pause menu.
+      if (game.shopOpen) {
+        game.closeShop();
+        return;
+      }
       setPaused((p) => !p);
     },
     () => setDevOpen((d) => !d),
@@ -68,6 +93,13 @@ export function App({ onStart }: Props) {
           />
         )}
         {devOpen && <DevPanel game={game} />}
+        {hud.shop && <ShopPanel game={game} />}
+        {bagOpen && <BackpackPanel game={game} onClose={() => setBagOpen(false)} />}
+        {hud.touch && !hud.shop && (
+          <button class="bag-button interactive" onClick={() => setBagOpen(true)}>
+            Bag
+          </button>
+        )}
         {isTouchDevice() && (
           <TouchControls
             input={game.input}

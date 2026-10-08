@@ -5,3 +5,5 @@ export * from './route.ts';
 export * from './terrain.ts';
 export * from './tiles.ts';
 export * from './features.ts';
+export * from './structures.ts';
+export * from './world.ts';

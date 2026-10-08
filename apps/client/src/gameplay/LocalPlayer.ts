@@ -1,5 +1,7 @@
 import {
   DRIVER_SPOT,
+  ITEMS,
+  type ItemKind,
   Frame,
   type InputFrame,
   type MotorContext,
@@ -141,6 +143,7 @@ export class LocalPlayer {
     m.stamina = ps.stamina;
     m.airTime = ps.airTime;
     m.mantle = ps.mantle;
+    m.carry = ps.carryKind ? (ITEMS[ps.carryKind as ItemKind]?.carrySpeed ?? 0.75) : 1;
     m.mx = ps.mx;
     m.my = ps.my;
     m.mz = ps.mz;

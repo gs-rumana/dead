@@ -94,7 +94,7 @@ export class Combat {
 
   fire(p: SimPlayer, cmd: FireCmd): void {
     const sim = this.sim;
-    if (p.life !== 0 || p.motor.driving) return;
+    if (p.life !== 0 || p.motor.driving || p.carry) return;
     const inv = p.inv;
     const gun = heldGun(inv);
     if (!gun) return;
@@ -238,7 +238,7 @@ export class Combat {
 
   melee(p: SimPlayer, dirX: number, dirZ: number): void {
     const sim = this.sim;
-    if (p.life !== 0 || p.motor.driving) return;
+    if (p.life !== 0 || p.motor.driving || p.carry) return;
     const w = WEAPONS[heldItem(p.inv) as WeaponId];
     if (!w || w.kind !== 'melee' || p.inv.cooldown > 0.05) return;
     const def = w as MeleeDef;
@@ -251,6 +251,8 @@ export class Combat {
     fx /= fl;
     fz /= fl;
     sim.events.push({ ev: { e: 'swing', by: p.id, w: def.id } });
+    // Melee breaks boarded windows and doors (§4.8).
+    sim.items.breakBoardsNear(p.wx + fx * 1.2, p.wy + 1.3, p.wz + fz * 1.2, 0.9);
     const cosArc = Math.cos(def.arc);
     for (const e of sim.enemySystem.enemies.values()) {
       if (e.state === 'dead') continue;
@@ -265,7 +267,7 @@ export class Combat {
 
   throw(p: SimPlayer, dx: number, dy: number, dz: number): void {
     const sim = this.sim;
-    if (p.life !== 0 || p.motor.driving) return;
+    if (p.life !== 0 || p.motor.driving || p.carry) return;
     const item = heldItem(p.inv) as WeaponId;
     const w = WEAPONS[item];
     if (!w || w.kind !== 'throw' || p.inv.cooldown > 0.05) return;
@@ -355,6 +357,7 @@ export class Combat {
     const sim = this.sim;
     const holy = pr.kind === 'holywater';
     sim.events.push({ ev: { e: 'explode', x: pr.x, y: pr.y, z: pr.z, r: def.radius, holy } });
+    if (!holy) sim.items.breakBoardsNear(pr.x, pr.y, pr.z, def.radius * 0.6);
     sim.enemySystem.makeNoise(pr.x, pr.z, def.noise);
     for (const e of sim.enemySystem.enemies.values()) {
       if (e.state === 'dead') continue;

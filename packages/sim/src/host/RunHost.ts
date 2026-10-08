@@ -6,7 +6,9 @@ import {
   type ServerMessages,
   ENEMY_TYPES,
   EnemyState,
+  FORT_POINTS,
   InventoryState,
+  ItemState,
   PROTOCOL_VERSION,
   PlayerFlag,
   PlayerState,
@@ -44,8 +46,9 @@ export interface RunHostOptions {
 export class RunHost {
   readonly state = new RunState();
   private readonly clients = new Map<string, HostClient>();
-  /** Enemy ids each client currently sees. */
+  /** Enemy and item ids each client currently sees. */
   private readonly visible = new Map<string, Set<string>>();
+  private readonly visibleItems = new Map<string, Set<string>>();
   private viewTick = 0;
 
   private constructor(
@@ -111,12 +114,14 @@ export class RunHost {
     const ps = this.state.players.get(client.id);
     if (ps) client.view.add(ps, ViewTag.Owner);
     this.visible.set(client.id, new Set());
+    this.visibleItems.set(client.id, new Set());
     this.updateViews(true);
   }
 
   leave(client: HostClient): void {
     this.clients.delete(client.id);
     this.visible.delete(client.id);
+    this.visibleItems.delete(client.id);
     this.sim.removePlayer(client.id);
     this.state.players.delete(client.id);
   }
@@ -185,6 +190,28 @@ export class RunHost {
         view.add(es);
         seen.add(id);
       }
+      // Items: everything within range, plus anything on the train or carried.
+      const seenItems = this.visibleItems.get(client.id);
+      if (!seenItems) continue;
+      const wantItems = new Set<string>();
+      for (const it of this.sim.items.items.values()) {
+        if (it.frame === 1 || it.holder || Math.hypot(it.wx - p.wx, it.wz - p.wz) <= VIEW_RADIUS)
+          wantItems.add(it.id);
+      }
+      for (const id of seenItems) {
+        if (!wantItems.has(id)) {
+          const is = this.state.items.get(id);
+          if (is) view.remove(is);
+          seenItems.delete(id);
+        }
+      }
+      for (const id of wantItems) {
+        if (seenItems.has(id)) continue;
+        const is = this.state.items.get(id);
+        if (!is) continue;
+        view.add(is);
+        seenItems.add(id);
+      }
     }
   }
 
@@ -210,6 +237,7 @@ export class RunHost {
     ts.driver = tr.driver;
     state.night = sim.nightType;
     this.writeEnemies();
+    this.writeItems();
     this.writeProjectiles();
     for (const p of sim.players.values()) {
       const ps = state.players.get(p.id);
@@ -245,7 +273,11 @@ export class RunHost {
     ps.life = p.life;
     ps.bleed = p.bleed;
     ps.revive = p.revive;
-    ps.held = p.inv.slots[p.inv.selected] ?? '';
+    ps.held = p.carry ? '' : (p.inv.slots[p.inv.selected] ?? '');
+    if (ps.carry !== p.carry) {
+      ps.carry = p.carry;
+      ps.carryKind = p.carry ? (this.sim.items.items.get(p.carry)?.kind ?? '') : '';
+    }
     if (ps.inv) writeInventory(p.inv, ps.inv);
   }
 
@@ -292,6 +324,46 @@ export class RunHost {
         state.enemies.delete(id);
         for (const seen of this.visible.values()) seen.delete(id);
       }
+    }
+  }
+
+  private writeItems(): void {
+    const { sim, state } = this;
+    for (const it of sim.items.items.values()) {
+      let is = state.items.get(it.id);
+      if (!is) {
+        is = new ItemState();
+        is.kind = it.kind;
+        state.items.set(it.id, is);
+      }
+      if (is.frame !== it.frame) is.frame = it.frame;
+      // Carried items follow their holder on the client; skip their position churn.
+      if (!it.holder || is.holder !== it.holder) {
+        if (is.x !== it.x) is.x = it.x;
+        if (is.y !== it.y) is.y = it.y;
+        if (is.z !== it.z) is.z = it.z;
+        is.yaw = it.yaw;
+      }
+      if (is.holder !== it.holder) is.holder = it.holder;
+      if (is.slot !== it.slot) is.slot = it.slot;
+      if (is.flying !== it.flying) is.flying = it.flying;
+      const extra =
+        it.kind === 'corpse'
+          ? ENEMY_TYPES.indexOf(it.body as (typeof ENEMY_TYPES)[number])
+          : it.amount;
+      if (is.extra !== extra) is.extra = Math.max(0, extra);
+      if (is.searched !== it.searched) is.searched = it.searched;
+    }
+    for (const id of [...state.items.keys()]) {
+      if (!sim.items.items.has(id)) {
+        state.items.delete(id);
+        for (const seen of this.visibleItems.values()) seen.delete(id);
+      }
+    }
+    for (const [key, v] of sim.items.props) if (state.props.get(key) !== v) state.props.set(key, v);
+    for (let i = 0; i < FORT_POINTS.length; i++) {
+      const f = sim.items.forts[i] ?? 0;
+      if (state.forts[i] !== f) state.forts[i] = f;
     }
   }
 
@@ -353,4 +425,9 @@ function writeInventory(inv: Inventory, out: InventoryState): void {
   out.holywater = inv.holywater;
   out.cash = inv.cash;
   out.reload = Math.round(inv.reload * 20) / 20;
+  // Backpack: rewrite on change.
+  if (out.pack.length !== inv.pack.length || inv.pack.some((k, i) => out.pack[i] !== k)) {
+    out.pack.clear();
+    for (const k of inv.pack) out.pack.push(k);
+  }
 }

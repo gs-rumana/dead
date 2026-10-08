@@ -296,6 +296,8 @@ export interface PoseInput {
   held?: string;
   /** Lying on the ground: downed or dead (§4.9). */
   downed?: boolean;
+  /** Carrying something bulky in both hands (§4.8). */
+  carrying?: boolean;
 }
 
 /** Procedural animation: walk/run cycle, idle breathing, jump, mantle and driving poses. */
@@ -414,6 +416,14 @@ export class Humanoid {
         b.lowerArmL.rotation.set(-0.5, 0, 0);
       }
       b.spine.rotation.y = 0;
+    }
+    if (p.carrying) {
+      // Both arms forward and low, hugging the load.
+      b.upperArmL.rotation.set(-1.0, 0, 0.35);
+      b.upperArmR.rotation.set(-1.0, 0, -0.35);
+      b.lowerArmL.rotation.set(-0.9, 0, 0);
+      b.lowerArmR.rotation.set(-0.9, 0, 0);
+      b.spine.rotation.x = -0.08;
     }
     if (this.swingT > 0) {
       this.swingT = Math.max(0, this.swingT - dt * 3);

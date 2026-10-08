@@ -46,6 +46,12 @@ export const hud = {
   respawnKm: 0,
   over: false,
   enemies: 0,
+  // Interaction and economy (§4.8, §4.10)
+  holdProgress: 0,
+  holdHint: '',
+  carrying: '',
+  shop: '',
+  pack: [] as string[],
   toasts: [] as Array<{ id: number; text: string; until: number }>,
 };
 

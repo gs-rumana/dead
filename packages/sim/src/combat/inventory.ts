@@ -19,6 +19,8 @@ export interface Inventory {
   reload: number;
   /** Seconds before the selected weapon can be used (equip, fire rate). */
   cooldown: number;
+  /** Backpack slots holding small valuables (§4.8). */
+  pack: string[];
 }
 
 export function starterInventory(solo: boolean): Inventory {
@@ -37,6 +39,7 @@ export function starterInventory(solo: boolean): Inventory {
     cash: 15,
     reload: 0,
     cooldown: 0,
+    pack: [],
   };
 }
 

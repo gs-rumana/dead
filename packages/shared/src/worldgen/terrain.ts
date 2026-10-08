@@ -12,8 +12,20 @@ export const BED_BLEND = 42;
  * Ground height everywhere (§6.6). Deterministic: the server's physics,
  * the client's physics and the rendered mesh all sample this same function.
  */
+/** A circle of flattened ground under a structure (§6.6). */
+export interface TerrainPad {
+  x: number;
+  z: number;
+  y: number;
+  r: number;
+}
+
+const PAD_CELL = 256;
+const PAD_BLEND = 14;
+
 export class Terrain {
   readonly seed: number;
+  private readonly pads = new Map<number, TerrainPad[]>();
   private readonly near: NearestResult = { s: 0, lateral: 0, dist: 0 };
   private readonly w: [number, number, number] = [1, 0, 0];
 
@@ -54,13 +66,44 @@ export class Terrain {
     return h;
   }
 
+  /** Registers flat ground under structures; call once before sampling heights. */
+  setPads(pads: TerrainPad[]): void {
+    this.pads.clear();
+    for (const p of pads) {
+      const r = p.r + PAD_BLEND;
+      const x0 = Math.floor((p.x - r) / PAD_CELL);
+      const x1 = Math.floor((p.x + r) / PAD_CELL);
+      const z0 = Math.floor((p.z - r) / PAD_CELL);
+      const z1 = Math.floor((p.z + r) / PAD_CELL);
+      for (let cz = z0; cz <= z1; cz++) {
+        for (let cx = x0; cx <= x1; cx++) {
+          const key = cx * 100003 + cz;
+          let list = this.pads.get(key);
+          if (!list) this.pads.set(key, (list = []));
+          list.push(p);
+        }
+      }
+    }
+  }
+
   height(x: number, z: number): number {
+    let h: number;
     const n = this.route.nearest(x, z, BED_BLEND + BED_HALF_WIDTH, this.near);
-    if (!n) return this.natural(x, z, this.progressAt(x, z));
-    const bed = this.route.heightAt(n.s);
-    const nat = this.natural(x, z, n.s);
-    const t = smoothstep(BED_HALF_WIDTH, BED_HALF_WIDTH + BED_BLEND, n.dist);
-    return bed + (nat - bed) * t;
+    if (!n) h = this.natural(x, z, this.progressAt(x, z));
+    else {
+      const bed = this.route.heightAt(n.s);
+      const nat = this.natural(x, z, n.s);
+      const t = smoothstep(BED_HALF_WIDTH, BED_HALF_WIDTH + BED_BLEND, n.dist);
+      h = bed + (nat - bed) * t;
+    }
+    if (this.pads.size === 0) return h;
+    const list = this.pads.get(Math.floor(x / PAD_CELL) * 100003 + Math.floor(z / PAD_CELL));
+    if (!list) return h;
+    for (const p of list) {
+      const d = Math.hypot(x - p.x, z - p.z);
+      if (d < p.r + PAD_BLEND) h = p.y + (h - p.y) * smoothstep(p.r, p.r + PAD_BLEND, d);
+    }
+    return h;
   }
 
   /** Surface "wetness/dirt" helpers for colouring: 1 on the track bed, 0 away from it. */

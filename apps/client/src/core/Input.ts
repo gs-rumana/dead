@@ -29,6 +29,8 @@ export class Input {
   invertY = false;
   /** Buttons pressed since the last sample, so quick taps are never lost. */
   private latched = 0;
+  /** Buttons tapped since the last frame check (for per-frame consumers like E and G). */
+  private frameTaps = 0;
   /** Key codes pressed since the last call to consumePressed(). */
   private readonly pressed = new Set<string>();
   private wheel = 0;
@@ -78,6 +80,17 @@ export class Input {
     return { mx, my };
   }
 
+  /** Buttons tapped since the last call (a press and release can fall between frames). */
+  consumeFrameTaps(): number {
+    const t = this.frameTaps | this.touchTaps;
+    this.frameTaps = 0;
+    this.touchTaps = 0;
+    return t;
+  }
+
+  /** Touch controls report taps here. */
+  touchTaps = 0;
+
   /** Currently held buttons, without consuming taps (for per-frame checks like aiming). */
   sampleHeld(): number {
     let b = this.touch.buttons;
@@ -113,6 +126,7 @@ export class Input {
     if (!e.repeat) this.pressed.add(e.code);
     this.keys.add(e.code);
     this.latched |= BINDINGS[e.code] ?? 0;
+    if (!e.repeat) this.frameTaps |= BINDINGS[e.code] ?? 0;
   };
 
   private readonly onWheel = (e: WheelEvent): void => {

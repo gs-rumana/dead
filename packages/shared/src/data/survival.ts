@@ -11,5 +11,3 @@ export const SURVIVAL = {
   tonicHeal: 75,
   useTime: 1.4,
 } as const;
-
-export type ItemId = 'bandage' | 'tonic' | 'pistol' | 'rifle' | 'shells' | 'dynamite' | 'holywater';

@@ -65,21 +65,23 @@ export function routeFeatures(seed: number): Feature[] {
   );
   out.push({ kind: 'fort', s: 40 * KM, km: 40, name: 'Fort Ironwood', side: 1, index: 0 });
   out.push({ kind: 'fort', s: 80 * KM, km: 80, name: 'Fort Haven', side: 1, index: 1 });
-  // Stations fill the gaps, roughly every 4–6 HUD km, kept clear of other stops.
-  let km = 4 + (hashInts(seed, 0x5a) % 2);
+  // Stations fill the gaps every 3–5 HUD km, kept clear of the other stops.
   let n = 0;
-  while (km < 78) {
-    const clear = out.every((f) => Math.abs(f.km - km) >= 2.5);
-    if (clear)
-      out.push({
-        kind: 'station',
-        s: km * KM,
-        km,
-        name: STATION_NAMES[n % STATION_NAMES.length]!,
-        side: side(300 + n),
-        index: n++,
-      });
-    km += 4 + (hashInts(seed, 0x5b, n) % 3);
+  let last = 0;
+  let gap = 3 + (hashInts(seed, 0x5a) % 3);
+  for (let km = 2; km < 78; km++) {
+    if (km - last < gap) continue;
+    if (!out.every((f) => Math.abs(f.km - km) >= 1.6)) continue;
+    out.push({
+      kind: 'station',
+      s: km * KM,
+      km,
+      name: STATION_NAMES[n % STATION_NAMES.length]!,
+      side: side(300 + n),
+      index: n++,
+    });
+    last = km;
+    gap = 3 + (hashInts(seed, 0x5b, n) % 3);
   }
   out.sort((a, b) => a.s - b.s);
   return out.filter((f) => f.s <= ROUTE_LENGTH);

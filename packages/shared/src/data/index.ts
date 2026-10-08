@@ -3,6 +3,7 @@
  * playtests can change it without touching logic.
  */
 export * from './enemies.ts';
+export * from './items.ts';
 export * from './player.ts';
 export * from './survival.ts';
 export * from './train.ts';

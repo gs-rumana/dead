@@ -39,11 +39,17 @@ export type Command =
   | { t: 'reload' }
   /** Use meds on yourself. */
   | { t: 'heal' }
+  /** E on a named target: 'item:<id>', 'door:<st>:<piece>', 'search:<st>:<piece>', 'cargo', 'firebox', 'fort:<i>', 'shop:<st>'. */
+  | { t: 'use'; target: string; hold?: boolean }
+  | { t: 'drop'; throw: boolean }
+  | { t: 'buy'; shop: string; kind: string }
+  | { t: 'sell'; shop: string; slot: number }
+  | { t: 'dropcash'; amount: number }
   | { t: 'drive'; on: boolean }
   | { t: 'reverser' }
   | { t: 'stoke' }
   | { t: 'respawn' }
-  | { t: 'dev'; action: string; value?: number };
+  | { t: 'dev'; action: string; value?: number; x?: number; y?: number; z?: number };
 
 /** Client → host messages. */
 export interface ClientMessages {

@@ -70,6 +70,7 @@ export function TouchControls({
     onPointerDown: (e: PointerEvent) => {
       e.stopPropagation();
       input.touch.buttons |= bit;
+      input.touchTaps |= bit;
     },
     onPointerUp: () => {
       input.touch.buttons &= ~bit;
@@ -156,9 +157,15 @@ export function TouchControls({
             >
               Aim
             </button>
-            <button class="tb big fire" {...hold(Btn.Fire)}>
-              Fire
-            </button>
+            {hud.carrying ? (
+              <button class="tb big" {...hold(Btn.Drop)}>
+                Drop
+              </button>
+            ) : (
+              <button class="tb big fire" {...hold(Btn.Fire)}>
+                Fire
+              </button>
+            )}
             <button
               class={sprint ? 'tb on' : 'tb'}
               onPointerDown={(e) => {

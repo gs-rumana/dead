@@ -43,6 +43,10 @@ export interface MotorState {
   /** Locked at the locomotive controls. */
   driving: boolean;
   sprinting: boolean;
+  /** Speed multiplier while carrying something bulky (1 = hands free, §4.8). */
+  carry: number;
+  /** On a ladder this tick. */
+  climbing: boolean;
 }
 
 export function makeMotorState(): MotorState {
@@ -66,6 +70,8 @@ export function makeMotorState(): MotorState {
     prevButtons: 0,
     driving: false,
     sprinting: false,
+    carry: 1,
+    climbing: false,
   };
 }
 
@@ -185,11 +191,36 @@ export function stepMotor(ctx: MotorContext, st: MotorState, input: InputFrame, 
     ix /= il;
     iy /= il;
   }
-  const wantsSprint = (input.buttons & Btn.Sprint) !== 0 && iy > 0.3 && st.stamina > 1;
+  const carrying = st.carry < 1;
+  const wantsSprint = (input.buttons & Btn.Sprint) !== 0 && iy > 0.3 && st.stamina > 1 && !carrying;
   st.sprinting = wantsSprint && st.grounded;
-  let speed: number = PLAYER.walkSpeed;
+  let speed: number = PLAYER.walkSpeed * st.carry;
   if (input.buttons & Btn.Aim) speed = PLAYER.aimSpeed;
   else if (wantsSprint) speed = PLAYER.sprintSpeed;
+
+  // Ladders (§4.8): pushing forward climbs, back descends, jump lets go.
+  const onTrain = st.frame === Frame.Train;
+  st.climbing =
+    ctx.space.onLadder(onTrain ? 'train' : 'ground', st.x, st.y, st.z) &&
+    !(input.buttons & Btn.Jump);
+  if (st.climbing) {
+    st.vy = iy * 3.2;
+    st.vx *= 0.5;
+    st.vz *= 0.5;
+    // Still allow a little sideways movement off the ladder.
+    st.vx += ix * cos * 1.2;
+    st.vz += -ix * sin * 1.2;
+    // Step onto the top or into the room: push forward at the top.
+    if (iy > 0.3) {
+      st.vx += -sin * 0.8;
+      st.vz += -cos * 0.8;
+    }
+    move(ctx, st, dt);
+    st.airTime = 0;
+    regen(st, dt);
+    if (st.frame === Frame.Train && !insideTrainBounds(st.x, st.y, st.z)) toWorldFrame(ctx, st);
+    return;
+  }
   const wx = (ix * cos - iy * sin) * speed;
   const wz = (-ix * sin - iy * cos) * speed;
   const accel = (st.grounded ? PLAYER.groundAccel : PLAYER.airAccel) * dt;
@@ -205,6 +236,7 @@ export function stepMotor(ctx: MotorContext, st: MotorState, input: InputFrame, 
   }
 
   if (st.sprinting) st.stamina = Math.max(0, st.stamina - PLAYER.sprintStaminaPerSec * dt);
+  else if (carrying && Math.hypot(ix, iy) > 0.1) st.stamina = Math.max(0, st.stamina - 4 * dt);
   else regen(st, dt);
 
   // Jump or mantle.

@@ -14,8 +14,11 @@ import {
   Route,
   TRAIN,
   Terrain,
+  World,
+  ITEMS,
+  pieceWorld,
+  type ItemKind,
   WORLD,
-  findInteractable,
   initPhysics,
   trainToWorld,
   trainYawAt,
@@ -41,6 +44,9 @@ import { RemotePlayers } from '../gameplay/RemotePlayers.ts';
 import { TrainClock } from '../gameplay/TrainClock.ts';
 import { TrainView } from '../gameplay/TrainView.ts';
 import { TerrainStreamer } from '../world/TerrainStreamer.ts';
+import { StructureView } from '../world/StructureView.ts';
+import { ItemView } from '../gameplay/ItemView.ts';
+import { type Target, findTarget } from '../gameplay/Interactions.ts';
 import { TrackStreamer } from '../world/TrackStreamer.ts';
 import { hud, toast } from '../ui/hudStore.ts';
 import { AudioEngine } from '../audio/AudioEngine.ts';
@@ -74,8 +80,20 @@ export class Game {
   private originZ = 0;
   readonly settings: Settings = loadSettings();
   quality: QualitySettings;
+  world!: World;
   private route!: Route;
   private terrain!: Terrain;
+  private structureView!: StructureView;
+  private itemView!: ItemView;
+  /** What E would act on right now. */
+  target: Target | null = null;
+  private useHeld = 0;
+  private useTarget: Target | null = null;
+  private useDone = false;
+  private dropHeld = 0;
+  private readonly appliedProps = new Map<string, number>();
+  /** Shop UI open for this structure ('' = closed). */
+  shopOpen = '';
   private space!: PhysicsSpace;
   private sky!: Sky;
   private terrainStreamer!: TerrainStreamer;
@@ -141,9 +159,11 @@ export class Game {
     perf.backend = backendName(this.renderer);
 
     const seed = this.conn.state.seed;
-    this.route = new Route(seed);
-    this.terrain = new Terrain(this.route);
+    this.world = new World(seed);
+    this.route = this.world.route;
+    this.terrain = this.world.terrain;
     this.space = new PhysicsSpace(R, this.terrain);
+    this.space.structureSource = (tx, tz) => this.world.structuresInTile(tx, tz);
 
     this.scene.add(this.worldRoot);
     this.sky = new Sky(1200);
@@ -165,7 +185,9 @@ export class Game {
     this.selfBody = createHumanoid(OUTFITS[0]!, paletteSkinnedMaterial());
     this.selfBody.mesh.castShadow = true;
     this.scene.add(this.selfBody.mesh);
-    this.features = routeFeatures(seed);
+    this.features = this.world.features;
+    this.structureView = new StructureView(this.worldRoot, this.world);
+    this.itemView = new ItemView(this.scene);
     this.enemyView = new EnemyView(this.scene, this.terrain);
     this.effects = new Effects(this.scene);
     this.effects.gore = this.settings.gore;
@@ -305,6 +327,8 @@ export class Game {
       remotes: this.remotes.count,
       enemies: this.enemyView.count,
       lastShot: this.weapons.lastShot,
+      target: this.target,
+      fuel: this.conn.state.train.fuel,
       scene: this.scene,
       /** Camera position in train space: steady numbers mean no jitter on the train. */
       cameraInTrain: () =>
@@ -352,6 +376,40 @@ export class Game {
     this.lookYaw = yaw - offset;
     this.lookPitch = Math.atan2(ty - eye.y, Math.hypot(b.x - px, b.z - pz));
     return b.id;
+  }
+
+  /** Test hook: point the crosshair at a world position. */
+  lookAt(x: number, y: number, z: number): void {
+    const eye = this.eyeWorld();
+    const offset =
+      this.local.motor.frame === Frame.Train
+        ? trainYawAt(this.trainView.poses, this.local.motor.z)
+        : 0;
+    let yaw = Math.atan2(-(x - eye.x), -(z - eye.z));
+    for (let i = 0; i < 3; i++) {
+      const px = eye.x + Math.cos(yaw) * 0.45;
+      const pz = eye.z - Math.sin(yaw) * 0.45;
+      yaw = Math.atan2(-(x - px), -(z - pz));
+    }
+    const px = eye.x + Math.cos(yaw) * 0.45;
+    const pz = eye.z - Math.sin(yaw) * 0.45;
+    this.lookYaw = yaw - offset;
+    this.lookPitch = Math.atan2(y - eye.y, Math.hypot(x - px, z - pz));
+  }
+
+  /** Test hooks: where things are in world space. */
+  piecePos(stId: string, pieceId: number): { x: number; y: number; z: number } | null {
+    const st = this.world.structure(stId);
+    const p = st?.pieces[pieceId];
+    return st && p ? pieceWorld(st, p) : null;
+  }
+
+  itemPos(id: string): { x: number; y: number; z: number } | null {
+    return this.itemView.position(id);
+  }
+
+  trainPos(x: number, y: number, z: number): { x: number; y: number; z: number } {
+    return trainToWorld(this.trainView.poses, x, y, z, { x: 0, y: 0, z: 0 });
   }
 
   /** Test hook: pull the trigger now. */
@@ -409,6 +467,13 @@ export class Game {
     }
     this.remotes.sample(state, now);
     this.enemyView.sample(state, now);
+    // Doors and boards change the local physics too, so prediction matches the host.
+    state.props.forEach((v, key) => {
+      if (this.appliedProps.get(key) !== v) {
+        this.appliedProps.set(key, v);
+        this.space.setPieceState(key, v);
+      }
+    });
   }
 
   private eyeWorld(): { x: number; y: number; z: number } {
@@ -512,6 +577,127 @@ export class Game {
     }
   }
 
+  /** Where a player's hands are (world), for carried items. */
+  private holderPose(
+    id: string,
+    lx: number,
+    ly: number,
+    lz: number,
+  ): { x: number; y: number; z: number; yaw: number } | null {
+    if (id === this.conn.selfId) {
+      const b = this.selfBody.mesh;
+      void lx;
+      void ly;
+      void lz;
+      return {
+        x: b.position.x + this.originX,
+        y: b.position.y,
+        z: b.position.z + this.originZ,
+        yaw: b.rotation.y,
+      };
+    }
+    const r = this.remotes.pose(id);
+    return r;
+  }
+
+  /** E: press or hold on what's under the crosshair; G: drop, hold to throw (§4.8). */
+  private updateInteraction(dt: number, frame: number, lx: number, ly: number, lz: number): void {
+    const me = this.conn.state.players.get(this.conn.selfId);
+    const m = this.local.motor;
+    const eye = this.eyeWorld();
+    const dir = this.camera.getWorldDirection(new THREE.Vector3());
+    const alive = (me?.life ?? 0) === Life.Alive;
+    this.target =
+      alive && !m.driving
+        ? findTarget(
+            {
+              ex: eye.x,
+              ey: eye.y,
+              ez: eye.z,
+              dx: dir.x,
+              dy: dir.y,
+              dz: dir.z,
+              fx: eye.x,
+              fy: eye.y - PLAYER.eyeHeight,
+              fz: eye.z,
+              frame,
+              tx: lx,
+              ty: ly,
+              tz: lz,
+              yaw: this.lookYaw,
+              pitch: this.lookPitch,
+              carryKind: me?.carryKind ?? '',
+            },
+            this.conn.state,
+            this.world,
+            this.itemView,
+            this.trainView.poses,
+          )
+        : null;
+    const held = this.input.sampleHeld();
+    const taps = this.input.consumeFrameTaps();
+    // A tap that started and ended between frames still counts as a press.
+    const eDown = ((held | taps) & Btn.Interact) !== 0 && !this.shopOpen;
+    if (eDown) {
+      if (this.useHeld === 0) {
+        this.useTarget = this.target;
+        this.useDone = false;
+        const t = this.useTarget;
+        if (t && t.hold === 0) {
+          this.press(t);
+          this.useDone = true;
+        }
+      }
+      this.useHeld += dt;
+      const t = this.useTarget;
+      if (!this.useDone && t && t.hold > 0 && this.useHeld >= t.hold) {
+        if (t.holdUse) this.conn.send('cmd', { t: 'use', target: t.holdUse, hold: true });
+        this.useDone = true;
+      }
+    } else if (this.useHeld > 0) {
+      const t = this.useTarget;
+      // A short press on something with a hold action does the press action (carry a body).
+      if (!this.useDone && t && t.use && t.holdUse && this.useHeld < Math.min(0.35, t.hold))
+        this.press(t);
+      this.useHeld = 0;
+      this.useTarget = null;
+    }
+    hud.holdProgress =
+      eDown && this.useTarget && !this.useDone && this.useTarget.hold > 0
+        ? Math.min(1, this.useHeld / this.useTarget.hold)
+        : 0;
+
+    const gDown = (held & Btn.Drop) !== 0;
+    if (gDown || taps & Btn.Drop) this.dropHeld += dt;
+    else if (this.dropHeld > 0) {
+      if (me?.carry) this.conn.send('cmd', { t: 'drop', throw: this.dropHeld > 0.35 });
+      this.dropHeld = 0;
+    }
+    // Close the shop when walking away.
+    if (this.shopOpen) {
+      const st = this.world.structure(this.shopOpen);
+      if (!st || Math.hypot(st.x - eye.x, st.z - eye.z) > 40) this.closeShop();
+    }
+  }
+
+  private press(t: Target): void {
+    if (t.shop) this.openShop(t.shop);
+    else if (t.use) this.conn.send('cmd', { t: 'use', target: t.use });
+  }
+
+  openShop(id: string): void {
+    this.shopOpen = id;
+    hud.shop = id;
+    this.input.enabled = false;
+    if (document.pointerLockElement) document.exitPointerLock();
+  }
+
+  closeShop(): void {
+    this.shopOpen = '';
+    hud.shop = '';
+    this.input.enabled = true;
+  }
+
   private nameOf(id: string): string {
     return this.conn.state.players.get(id)?.name ?? 'Someone';
   }
@@ -571,6 +757,7 @@ export class Game {
     );
     this.space.setTrainPoses(this.trainView.poses);
     this.space.refresh();
+    this.trainView.updateForts(this.conn.state.forts.toArray(), this.originX, this.originZ);
 
     // Local player render position (interpolated between predicted ticks).
     const alpha = this.acc / SIM_DT;
@@ -610,8 +797,9 @@ export class Game {
       driving: m.driving,
       mantling: m.mantle > 0,
       sprinting: m.sprinting,
-      held: m.driving ? '' : held,
+      held: m.driving || me?.carry ? '' : held,
       downed: (me?.life ?? 0) !== Life.Alive,
+      carrying: !!me?.carry,
     });
 
     const aim = this.weapons.aimT;
@@ -658,6 +846,24 @@ export class Game {
       this.sky.night,
     );
     this.effects.update(dt, this.originX, this.originZ);
+    const camW = this.rig.worldPos;
+    this.structureView.update(
+      dt,
+      camW.x,
+      camW.z,
+      Math.min(this.quality.viewDistance, 420),
+      (k) => this.conn.state.props.get(k) ?? 0,
+      this.sky.night,
+    );
+    this.itemView.update(
+      dt,
+      this.conn.state,
+      this.trainView.poses,
+      (id) => this.holderPose(id, lx, ly, lz),
+      this.originX,
+      this.originZ,
+    );
+    this.updateInteraction(dt, m.frame, lx, ly, lz);
     this.ambientGroans(dt);
     this.viewDelayT -= dt;
     if (this.viewDelayT <= 0) {
@@ -860,9 +1066,16 @@ export class Game {
     hud.pointerLocked = this.input.pointerLocked;
     if (m.driving) hud.prompt = 'Leave the controls';
     else {
-      const it = findInteractable(m.frame, m.x, m.y, m.z, this.lookYaw, this.lookPitch);
-      hud.prompt = it ? (it.id === 'firebox' ? `${it.prompt} (${t.coal} left)` : it.prompt) : '';
+      const tg = this.target;
+      hud.prompt = tg
+        ? tg.hold > 0 && !tg.use
+          ? `Hold to ${tg.holdPrompt ?? tg.prompt}`.replace('Hold to Search', 'Hold to search')
+          : tg.prompt
+        : '';
+      hud.holdHint = tg?.holdUse && tg.use ? `hold: ${tg.holdPrompt}` : '';
     }
+    const meCarry = me?.carryKind as ItemKind | undefined;
+    hud.carrying = meCarry ? (ITEMS[meCarry]?.name ?? '') : '';
     if (m.frame === Frame.World) {
       const loco = this.trainView.locoPose;
       hud.distanceToTrain = Math.hypot(loco.cx - m.x, loco.cz - m.z);

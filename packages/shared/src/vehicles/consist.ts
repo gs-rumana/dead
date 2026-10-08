@@ -182,6 +182,46 @@ export const GAP_PLATES: ColliderBox[] = [
   b(-0.9, 0.9, LOCO_FLOOR - 0.08, LOCO_FLOOR, CONSIST[0]!.z1 - 0.3, CONSIST[1]!.z0 + 0.3),
 ];
 
+/** Cargo slots on the flatcar deck (§4.8 snap placement), in train space. */
+export const CARGO_SLOTS: Array<{ x: number; y: number; z: number }> = (() => {
+  const flat = CONSIST[2]!;
+  const out: Array<{ x: number; y: number; z: number }> = [];
+  for (let row = 0; row < 5; row++) {
+    for (const x of [-0.75, 0.75]) out.push({ x, y: FLATCAR_DECK, z: flat.z0 + 1.6 + row * 2.3 });
+  }
+  return out;
+})();
+
+/** Fortification points along the train's sides (§4.3): plates and wire snap here. */
+export const FORT_POINTS: Array<{ x: number; y: number; z: number; z0: number; z1: number }> =
+  (() => {
+    const out: Array<{ x: number; y: number; z: number; z0: number; z1: number }> = [];
+    const flat = CONSIST[2]!;
+    const tender = CONSIST[1]!;
+    const loco = CONSIST[0]!;
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 4; i++) {
+        const z0 = flat.z0 + i * (flat.def.length / 4);
+        const z1 = z0 + flat.def.length / 4;
+        out.push({ x: side * 1.5, y: FLATCAR_DECK + 0.5, z: (z0 + z1) / 2, z0, z1 });
+      }
+      out.push({ x: side * 1.5, y: LOCO_FLOOR + 0.6, z: tender.zc, z0: tender.z0, z1: tender.z1 });
+      out.push({
+        x: side * 1.5,
+        y: LOCO_FLOOR + 0.6,
+        z: loco.zc + 4.1,
+        z0: loco.zc + 2.6,
+        z1: loco.z1,
+      });
+    }
+    return out;
+  })();
+
+/** Climbable ladders on the train (train space): the tender's rear ladder. */
+export const TRAIN_LADDERS: ColliderBox[] = [
+  b(0.4, 1.1, 0.3, TENDER_TOP + 0.6, CONSIST[1]!.z1 - 0.05, CONSIST[1]!.z1 + 0.45),
+];
+
 /** Interactables resolved to train space. */
 export function trainInteractables(): Array<Interactable & { tz: number }> {
   const out: Array<Interactable & { tz: number }> = [];

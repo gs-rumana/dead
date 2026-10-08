@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
 import {
   CONSIST,
+  FORT_POINTS,
   type CarPose,
   type Route,
   TRAIN,
@@ -9,6 +10,7 @@ import {
   makeCarPoses,
 } from '@dead-tracks/shared';
 import { glowMaterial, paletteMaterial } from '../render/materials.ts';
+import { itemGeometry } from '../render/models/items.ts';
 import {
   CRANK_RADIUS,
   CYLINDER_Y,
@@ -60,6 +62,8 @@ export class TrainView {
   private readonly tmp2 = new THREE.Matrix4();
   private readonly v = new THREE.Vector3();
   private flicker = 0;
+  /** Bolted plates and strung wire at the fortification points (§4.3). */
+  private readonly fortMeshes: Array<{ plate: THREE.Mesh; wire: THREE.Mesh }> = [];
   /** Called on every exhaust beat (for sound). */
   onChuff: ((throttle: number) => void) | null = null;
 
@@ -121,6 +125,40 @@ export class TrainView {
     scene.add(this.lampGlow);
     this.fireLight = new THREE.PointLight(0xff8a3a, 0, 9, 1.6);
     scene.add(this.fireLight);
+    for (let i = 0; i < FORT_POINTS.length; i++) {
+      const plate = new THREE.Mesh(itemGeometry('plate'), mat);
+      const wire = new THREE.Mesh(itemGeometry('wire'), mat);
+      for (const m of [plate, wire]) {
+        m.matrixAutoUpdate = false;
+        m.visible = false;
+        m.castShadow = true;
+        scene.add(m);
+      }
+      this.fortMeshes.push({ plate, wire });
+    }
+  }
+
+  /** Shows plates and wire per the synced fortification state. */
+  updateForts(forts: ArrayLike<number>, originX: number, originZ: number): void {
+    FORT_POINTS.forEach((fp, i) => {
+      const f = forts[i] ?? 0;
+      const fm = this.fortMeshes[i]!;
+      fm.plate.visible = f === 1;
+      fm.wire.visible = f === 2;
+      if (!f) return;
+      const car = CONSIST.findIndex((c) => fp.z >= c.z0 && fp.z <= c.z1);
+      const p = this.poses[Math.max(0, car)] as CarPose;
+      const c = CONSIST[Math.max(0, car)]!;
+      setCarMatrix(this.carMat, p, originX, originZ);
+      // Stand the plate on the car's side, facing out.
+      this.tmp
+        .makeRotationY(fp.x > 0 ? Math.PI / 2 : -Math.PI / 2)
+        .setPosition(fp.x + Math.sign(fp.x) * 0.05, fp.y - 0.55, fp.z - c.zc);
+      const target = f === 1 ? fm.plate : fm.wire;
+      target.matrix.multiplyMatrices(this.carMat, this.tmp);
+      if (f === 2) target.matrix.scale(new THREE.Vector3(2.6, 1, 1));
+      target.matrixWorldNeedsUpdate = true;
+    });
   }
 
   get locoPose(): CarPose {

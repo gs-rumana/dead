@@ -63,6 +63,26 @@ test('shoot walkers: hits register, heads pop, iron sights render', async ({ pag
     .toBeGreaterThan(3);
   await page.waitForTimeout(400);
 
+  // Count our kills from the host's hit events (bodies become items after a moment).
+  await page.evaluate(() => {
+    const d = (
+      window as unknown as {
+        __dt: Dbg & {
+          conn: {
+            onEvents: (
+              cb: (evs: Array<{ e: string; kill?: boolean; by?: string }>) => void,
+            ) => void;
+          };
+        };
+      }
+    ).__dt;
+    (window as unknown as { __kills: number }).__kills = 0;
+    d.conn.onEvents((evs) => {
+      for (const ev of evs)
+        if (ev.e === 'hit' && ev.kill && ev.by === d.conn.selfId)
+          (window as unknown as { __kills: number }).__kills++;
+    });
+  });
   // Headshots with the revolver until they're down.
   let kills = 0;
   for (let i = 0; i < 12 && kills < 3; i++) {
@@ -73,13 +93,7 @@ test('shoot walkers: hits register, heads pop, iron sights render', async ({ pag
     await page.waitForTimeout(120);
     await page.evaluate(() => (window as unknown as { __dt: Dbg }).__dt.game.trigger());
     await page.waitForTimeout(450);
-    kills = await page.evaluate(() => {
-      let n = 0;
-      (window as unknown as { __dt: Dbg }).__dt.conn.state.enemies.forEach((e) => {
-        if (e.anim === 5) n++;
-      });
-      return n;
-    });
+    kills = await page.evaluate(() => (window as unknown as { __kills: number }).__kills);
     if (i === 1) await page.screenshot({ path: 'out/m3-shot.png' });
   }
   expect(kills).toBeGreaterThanOrEqual(2);

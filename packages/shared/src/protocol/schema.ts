@@ -29,6 +29,8 @@ export const InventoryState = schema(
     cash: t.uint32(),
     /** Seconds until the current reload step finishes; 0 = not reloading. */
     reload: t.float32(),
+    /** Backpack: small valuables (§4.8). */
+    pack: t.array('string'),
   },
   'InventoryState',
 );
@@ -70,6 +72,9 @@ export const PlayerState = schema(
     revive: t.float32(),
     /** Item id held in hand (others render it). */
     held: t.string(),
+    /** Item id and kind carried in both hands ('' if none). */
+    carry: t.string(),
+    carryKind: t.string(),
     inv: t.ref(InventoryState).view(ViewTag.Owner),
   },
   'PlayerState',
@@ -155,6 +160,29 @@ export const ProjectileState = schema(
 );
 export type ProjectileState = SchemaType<typeof ProjectileState>;
 
+/** An item in the world, on the train or in someone's hands (§4.8). */
+export const ItemState = schema(
+  {
+    kind: t.string(),
+    /** 0 world, 1 train space. */
+    frame: t.uint8(),
+    x: t.float32(),
+    y: t.float32(),
+    z: t.float32(),
+    yaw: t.angle({ bits: 8 }),
+    /** Player carrying it, or ''. */
+    holder: t.string(),
+    /** Cargo slot or -1. */
+    slot: t.int8(),
+    flying: t.boolean(),
+    /** For bodies: enemy type index; for cash: the amount. */
+    extra: t.uint16(),
+    searched: t.boolean(),
+  },
+  'ItemState',
+);
+export type ItemState = SchemaType<typeof ItemState>;
+
 /** M0 sync probe: a spinning object driven by the host; any client can recolor it. */
 export const TestObject = schema(
   {
@@ -181,6 +209,11 @@ export const RunState = schema(
     test: TestObject,
     players: t.map(PlayerState),
     enemies: t.map(EnemyState).view(),
+    items: t.map(ItemState).view(),
+    /** Dynamic structure state: "structure:piece" → 1 (door open, searched, broken). */
+    props: t.map('uint8'),
+    /** Fortification per point: 0 none, 1 plate, 2 wire (§4.3). */
+    forts: t.array('uint8'),
     projectiles: t.map(ProjectileState),
     /** Night type for this cycle (§4.5): 0 clear, 1 full moon, 2 blood moon, 3 storm, 4 fog. */
     night: t.uint8(),

@@ -188,6 +188,18 @@ export function Hud({ onMenu }: { onMenu: () => void }) {
       {hud.prompt && (
         <div class="prompt" data-testid="prompt">
           <kbd>{hud.touch ? 'Use' : 'E'}</kbd> {hud.prompt}
+          {hud.holdHint && <span class="hold-hint"> · {hud.holdHint}</span>}
+          {hud.holdProgress > 0 && (
+            <div class="bar hold">
+              <div style={{ width: `${hud.holdProgress * 100}%` }} />
+            </div>
+          )}
+        </div>
+      )}
+      {hud.carrying && (
+        <div class="carrying" data-testid="carrying">
+          Carrying {hud.carrying} · <kbd>{hud.touch ? 'Drop' : 'G'}</kbd> drop
+          {hud.touch ? '' : ' · hold G to throw'}
         </div>
       )}
 
